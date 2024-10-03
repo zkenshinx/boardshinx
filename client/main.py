@@ -36,45 +36,51 @@ class Card:
     def __init__(self, back_path, front_path, x, y, width, height):
         self.original_back_image = pygame.image.load(back_path)
         self.original_front_image = pygame.image.load(front_path)
-        self.back_image = pygame.transform.scale(self.original_back_image, (width, height))
-        self.front_image = pygame.transform.scale(self.original_front_image, (width, height))
-        self.x = x
-        self.y = y
+        self.original_width = width
+        self.original_height = height
         self.width = width
         self.height = height
+        self.x = x
+        self.y = y
         self.is_front = False
         self.border_thickness = 5  # Thickness of the border
         self.white_space = 15  # Space between the card and the border
+        
+        # Create combined images
+        self.create_images()
+
+    def create_images(self):
+        self.back_image = self.create_combined_image(self.original_back_image)
+        self.front_image = self.create_combined_image(self.original_front_image)
+
+    def create_combined_image(self, original_image):
+        """Create a new image combining the original image and its outline."""
+        scaled_image = pygame.transform.smoothscale(original_image, (self.width, self.height))
+        combined_surface = pygame.Surface((self.width + 2 * self.border_thickness, 
+                                            self.height + 2 * self.white_space + self.border_thickness), 
+                                           pygame.SRCALPHA)
+        pygame.draw.rect(combined_surface, (0, 0, 0), 
+                         (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
+                         width=self.border_thickness, border_radius=20)
+        combined_surface.blit(scaled_image, (self.border_thickness, self.white_space))
+        return combined_surface
 
     def update(self):
         """Update logic for the card (if needed)."""
         pass
 
     def render(self, screen, dx, dy):
-        """Draw the card on the screen with a rounded black border and white spacing."""
-        # Draw the card
+        """Draw the card on the screen."""
         if self.is_front:
             screen.blit(self.front_image, (self.x + dx, self.y + dy))
         else:
             screen.blit(self.back_image, (self.x + dx, self.y + dy))
 
-        # Draw outline
-        border_x = self.x + dx - self.border_thickness
-        border_y = self.y + dy - self.white_space - self.border_thickness
-        rounded_rect_surface = pygame.Surface((self.width + 2 * self.border_thickness, 
-                                                self.height + 2 * self.white_space + self.border_thickness), 
-                                               pygame.SRCALPHA)
-        pygame.draw.rect(rounded_rect_surface, (0, 0, 0), 
-                         (0, 0, rounded_rect_surface.get_width(), rounded_rect_surface.get_height()), 
-                         width=self.border_thickness, border_radius=20)
-        screen.blit(rounded_rect_surface, (border_x, border_y))
-
-
     def set_scale(self, scale_factor):
         """Scale the image based on the zoom level."""
-        new_size = (int(self.width * scale_factor), int(self.height * scale_factor))
-        self.back_image = pygame.transform.scale(self.original_back_image, new_size)
-        self.front_image = pygame.transform.scale(self.original_front_image, new_size)
+        self.width = self.original_width * scale_factor
+        self.height = self.original_height * scale_factor
+        self.create_images()
 
     def is_clicked(self, mouse_pos, dx, dy):
         """Check if the card was clicked based on the mouse position."""
