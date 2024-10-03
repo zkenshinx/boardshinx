@@ -43,17 +43,32 @@ class Card:
         self.width = width
         self.height = height
         self.is_front = False
+        self.border_thickness = 5  # Thickness of the border
+        self.white_space = 15  # Space between the card and the border
 
     def update(self):
         """Update logic for the card (if needed)."""
         pass
 
     def render(self, screen, dx, dy):
-        """Draw the card on the screen."""
+        """Draw the card on the screen with a rounded black border and white spacing."""
+        # Draw the card
         if self.is_front:
             screen.blit(self.front_image, (self.x + dx, self.y + dy))
         else:
             screen.blit(self.back_image, (self.x + dx, self.y + dy))
+
+        # Draw outline
+        border_x = self.x + dx - self.border_thickness
+        border_y = self.y + dy - self.white_space - self.border_thickness
+        rounded_rect_surface = pygame.Surface((self.width + 2 * self.border_thickness, 
+                                                self.height + 2 * self.white_space + self.border_thickness), 
+                                               pygame.SRCALPHA)
+        pygame.draw.rect(rounded_rect_surface, (0, 0, 0), 
+                         (0, 0, rounded_rect_surface.get_width(), rounded_rect_surface.get_height()), 
+                         width=self.border_thickness, border_radius=20)
+        screen.blit(rounded_rect_surface, (border_x, border_y))
+
 
     def set_scale(self, scale_factor):
         """Scale the image based on the zoom level."""
@@ -66,7 +81,7 @@ class Card:
         rect = pygame.Rect(self.x + dx, self.y + dy, self.width, self.height)
         return rect.collidepoint(mouse_pos)
 
-    def to_json():
+    def to_json(self):
         return {
             "type": "card",
             "x": self.x,
