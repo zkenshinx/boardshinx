@@ -31,6 +31,7 @@ class Picture:
             # "path": self.path
         }
 
+
 class Card:
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height):
@@ -43,10 +44,9 @@ class Card:
         self.x = x
         self.y = y
         self.is_front = False
-        self.border_thickness = 5  # Thickness of the border
-        self.white_space = 15  # Space between the card and the border
-        
-        # Create combined images
+        self.border_thickness = 5
+        self.white_space = 15
+        self.border_radius = 20
         self.create_images()
 
     def create_images(self):
@@ -59,12 +59,21 @@ class Card:
         combined_surface = pygame.Surface((self.width + 2 * self.border_thickness, 
                                             self.height + 2 * self.white_space + self.border_thickness), 
                                            pygame.SRCALPHA)
-        pygame.draw.rect(combined_surface, (0, 0, 0), 
+        
+        # Draw a filled rectangle with rounded corners
+        pygame.draw.rect(combined_surface, (255, 255, 255),  # White fill
                          (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
-                         width=self.border_thickness, border_radius=20)
+                         border_radius=self.border_radius)
+        
+        # Draw the border
+        pygame.draw.rect(combined_surface, (0, 0, 0),  # Black border
+                         (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
+                         width=self.border_thickness, border_radius=self.border_radius)
+        
         combined_surface.blit(scaled_image, (self.border_thickness, self.white_space))
         return combined_surface
 
+    # ... (rest of the methods remain unchanged)
     def update(self):
         """Update logic for the card (if needed)."""
         pass
@@ -98,7 +107,7 @@ class Card:
 class Game:
     WINDOW_WIDTH = 1280
     WINDOW_HEIGHT = 720
-    FPS = 60  # Adjust FPS for smoother gameplay
+    FPS = 60
     CLICKED_OBJECT_SCALE = 1.1
 
     def __init__(self):
@@ -107,7 +116,7 @@ class Game:
         pygame.display.set_caption("Boardshinx")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.state = "playing"  # Simple state system to handle menus, etc.
+        self.state = "playing"
 
         # Initialize game objects
         self.game_objects = []
@@ -119,7 +128,7 @@ class Game:
         # rect_y = (self.WINDOW_HEIGHT - rect_height) // 2
         # rectangle = Picture("assets/sarpedon.webp", rect_x, rect_y, rect_width, rect_height)
         # self.game_objects.append(rectangle)
-        card = Card("assets/medusa/back.webp", "assets/medusa/deck/3x-dash.png", 0, 0, 250, 349)
+        card = Card("assets/medusa/back.webp", "assets/medusa/deck/3x-dash.png", 0, 0, 230, 329)
         self.game_objects.append(card)
 
         # Initialize font for displaying mouse coordinates
@@ -129,8 +138,8 @@ class Game:
         self.prev_mouse_x, self.prev_mouse_y = pygame.mouse.get_pos()
         self.sum_dx = 0
         self.sum_dy = 0
-        self.moving_around_board = False  # Track whether the mouse button is held down
-        self.zoom_scale = 1.0  # Initialize zoom scale
+        self.moving_around_board = False
+        self.zoom_scale = 1.0
 
     def run(self):
         """Main game loop."""
