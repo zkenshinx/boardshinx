@@ -1,13 +1,19 @@
+import os
 import pygame, sys
 from random import randint
+from functools import lru_cache
+import random
 
 class Card(pygame.sprite.Sprite):
+    _image_cache = {}
+
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height, group):
         super().__init__(group)
         self.group = group
-        self.original_back_image = pygame.image.load(back_path)
-        self.original_front_image = pygame.image.load(front_path)
+        self.back_image_path = back_path
+        self.front_image_path = front_path
+
         self.original_width = width
         self.original_height = height
         self.width = width
@@ -15,40 +21,43 @@ class Card(pygame.sprite.Sprite):
         self.x = x
         self.y = y
         self.pos = (x, y)
-        self.is_front = False
-        self.border_thickness = 5
-        self.white_space = 15
-        self.border_radius = 20
+        self.is_front = random.choice([False] * 5 + [True])
         self.zoom_scale = group.zoom_scale
         self.mouse_pos = (0, 0)
         self.set_image()
 
     def set_image(self):
         if self.is_front:
-            self.image = self.create_combined_image(self.original_front_image)
+            self.image = Card.create_combined_image(self.front_image_path, self.width, self.height)
             self.rect = self.image.get_rect(topleft = self.pos)
         else:
-            self.image = self.create_combined_image(self.original_back_image)
+            self.image = Card.create_combined_image(self.back_image_path, self.width, self.height)
             self.rect = self.image.get_rect(topleft = self.pos)
 
-    def create_combined_image(self, original_image):
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def create_combined_image(image_path, width, height):
         """Create a new image combining the original image and its outline."""
-        scaled_image = pygame.transform.smoothscale(original_image, (self.width, self.height))
-        combined_surface = pygame.Surface((self.width + 2 * self.border_thickness, 
-                                            self.height + 2 * self.white_space + self.border_thickness), 
+        border_thickness = 5
+        white_space = 15
+        border_radius = 20
+        image = pygame.image.load(image_path)
+        scaled_image = pygame.transform.smoothscale(image, (width, height))
+        combined_surface = pygame.Surface((width + 2 * border_thickness, 
+                                            height + 2 * white_space + border_thickness), 
                                            pygame.SRCALPHA)
         
         # Draw a filled rectangle with rounded corners
         pygame.draw.rect(combined_surface, (255, 255, 255),  # White fill
                          (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
-                         border_radius=self.border_radius)
+                         border_radius=border_radius)
         
         # Draw the border
         pygame.draw.rect(combined_surface, (0, 0, 0),  # Black border
                          (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
-                         width=self.border_thickness, border_radius=self.border_radius)
+                         width=border_thickness, border_radius=border_radius)
         
-        combined_surface.blit(scaled_image, (self.border_thickness, self.white_space))
+        combined_surface.blit(scaled_image, (border_thickness, white_space))
         return combined_surface
 
     def update(self):
@@ -116,12 +125,16 @@ class Game:
         self.font = pygame.font.SysFont(None, 36)
         self.moving_around_board = False
 
-        for i in range(10):
-            for j in range(10):
-                hero = "tomoe-gozen"
+
+        v = 10
+        hero = "tomoe-gozen"
+        deck = [f for f in os.listdir(f"assets/{hero}/deck/")]
+        for i in range(v):
+            for j in range(v):
+                index = j + i * v
                 back_path = f"assets/{hero}/back.webp"
-                front_path = f"assets/{hero}/deck/3x-skirmish.png"
-                card = Card(back_path, front_path, 230*i, 329*j, 230, 329, self.camera_group)
+                front_path = f"assets/{hero}/deck/{deck[index % len(deck)]}"
+                card = Card(back_path, front_path, 230*(i - v/2), 329*(j-v/2), 230, 329, self.camera_group)
 
 
     def run(self):
