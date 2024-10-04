@@ -21,13 +21,15 @@ class Card(pygame.sprite.Sprite):
         self.border_radius = 20
         self.zoom_scale = group.zoom_scale
         self.mouse_pos = (0, 0)
-        self.create_images()
-
-    def create_images(self):
-        self.back_image = self.create_combined_image(self.original_back_image)
-        self.front_image = self.create_combined_image(self.original_front_image)
         self.set_image()
-        self.rect = self.back_image.get_rect(topleft = self.pos)
+
+    def set_image(self):
+        if self.is_front:
+            self.image = self.create_combined_image(self.original_front_image)
+            self.rect = self.image.get_rect(topleft = self.pos)
+        else:
+            self.image = self.create_combined_image(self.original_back_image)
+            self.rect = self.image.get_rect(topleft = self.pos)
 
     def create_combined_image(self, original_image):
         """Create a new image combining the original image and its outline."""
@@ -49,18 +51,10 @@ class Card(pygame.sprite.Sprite):
         combined_surface.blit(scaled_image, (self.border_thickness, self.white_space))
         return combined_surface
 
-    # ... (rest of the methods remain unchanged)
     def update(self):
         if self.zoom_scale != self.group.zoom_scale:
             self.zoom_scale = self.group.zoom_scale
-            # self.set_scale(self.zoom_scale)
-            self.create_images()
-
-    def set_image(self):
-        if self.is_front:
-            self.image = self.front_image
-        else:
-            self.image = self.back_image
+            self.set_image()
 
     def flip(self):
         self.is_front = not self.is_front
@@ -83,11 +77,6 @@ class CameraGroup(pygame.sprite.Group):
     def __init__(self):
         super().__init__()
         self.display_surface = pygame.display.get_surface()
-
-        # camera offset 
-        self.offset = pygame.math.Vector2()
-
-        # zoom 
         self.zoom_scale = 1
 
     def custom_draw(self):
@@ -123,21 +112,17 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = "playing"
-
         self.camera_group = CameraGroup()
+        self.font = pygame.font.SysFont(None, 36)
+        self.moving_around_board = False
 
-        for i in range(5):
-            for j in range(5):
+        for i in range(10):
+            for j in range(10):
                 hero = "tomoe-gozen"
                 back_path = f"assets/{hero}/back.webp"
                 front_path = f"assets/{hero}/deck/3x-skirmish.png"
                 card = Card(back_path, front_path, 230*i, 329*j, 230, 329, self.camera_group)
 
-        # Initialize font for displaying mouse coordinates
-        self.font = pygame.font.SysFont(None, 36)  # Default font and size
-
-        # Initialize mouse position variables
-        self.moving_around_board = False
 
     def run(self):
         """Main game loop."""
@@ -185,21 +170,6 @@ class Game:
         new_zoom = self.camera_group.zoom_scale + event.y * 0.03
         if 0.2 < new_zoom < 2.0:
             self.camera_group.zoom(new_zoom)
-
-    def render(self):
-        self.screen.fill((255, 255, 255))
-
-        if self.state == "playing":
-            for obj in self.game_objects:
-                obj.render(self.screen)
-
-            mouse_x, mouse_y = pygame.mouse.get_pos()
-
-            # coord_text = f"({mouse_x - self.sum_dx}, {mouse_y - self.sum_dy}), Zoom: {self.zoom_scale}"
-            coord_surface = self.font.render(coord_text, True, (0, 0, 0))
-            self.screen.blit(coord_surface, (10, 10))
-
-        pygame.display.flip()  # Update the display
 
     def quit(self):
         """Quit the game and clean up resources."""
