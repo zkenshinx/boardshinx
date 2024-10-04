@@ -1,35 +1,36 @@
-import pygame
+import pygame, sys
+from random import randint
 
-class Picture:
-    """Represents a picture in the game."""
-    def __init__(self, path, x, y, width, height):
-        self.original_image = pygame.image.load(path)
-        self.image = pygame.transform.scale(self.original_image, (width, height))
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-
-    def update(self):
-        """Update logic for the picture (if needed)."""
-        pass
-
-    def render(self, screen, dx, dy):
-        """Draw the picture on the screen."""
-        screen.blit(self.image, (self.x + dx, self.y + dy))
-
-    def set_scale(self, scale_factor):
-        """Scale the image based on the zoom level."""
-        new_size = (int(self.width * scale_factor), int(self.height * scale_factor))
-        self.image = pygame.transform.scale(self.original_image, new_size)
-
-    def to_json():
-        return {
-            "type": "picture",
-            "x": self.x,
-            "y": self.y,
-            # "path": self.path
-        }
+# class Picture:
+#     """Represents a picture in the game."""
+#     def __init__(self, path, x, y, width, height):
+#         self.original_image = pygame.image.load(path)
+#         self.image = pygame.transform.scale(self.original_image, (width, height))
+#         self.x = x
+#         self.y = y
+#         self.width = width
+#         self.height = height
+# 
+#     def update(self):
+#         """Update logic for the picture (if needed)."""
+#         pass
+# 
+#     def render(self, screen, dx, dy):
+#         """Draw the picture on the screen."""
+#         screen.blit(self.image, (self.x + dx, self.y + dy))
+# 
+#     def set_scale(self, scale_factor):
+#         """Scale the image based on the zoom level."""
+#         new_size = (int(self.width * scale_factor), int(self.height * scale_factor))
+#         self.image = pygame.transform.scale(self.original_image, new_size)
+# 
+#     def to_json():
+#         return {
+#             "type": "picture",
+#             "x": self.x,
+#             "y": self.y,
+#             # "path": self.path
+#         }
 
 
 class Card:
@@ -128,14 +129,16 @@ class Game:
         # rect_y = (self.WINDOW_HEIGHT - rect_height) // 2
         # rectangle = Picture("assets/sarpedon.webp", rect_x, rect_y, rect_width, rect_height)
         # self.game_objects.append(rectangle)
-        card = Card("assets/medusa/back.webp", "assets/medusa/deck/3x-dash.png", 0, 0, 230, 329)
-        self.game_objects.append(card)
+        for i in range(1):
+            for j in range(1):
+                hero = "tomoe-gozen"
+                card = Card(f"assets/{hero}/back.webp", f"assets/{hero}/deck/3x-skirmish.png", 230*i, 329*j, 230, 329)
+                self.game_objects.append(card)
 
         # Initialize font for displaying mouse coordinates
         self.font = pygame.font.SysFont(None, 36)  # Default font and size
 
         # Initialize mouse position variables
-        self.prev_mouse_x, self.prev_mouse_y = pygame.mouse.get_pos()
         self.sum_dx = 0
         self.sum_dy = 0
         self.moving_around_board = False
@@ -181,24 +184,17 @@ class Game:
                 else:
                     mouse_pos = event.pos
                     # Check if the card was clicked
-                    card = self.game_objects[0]
-                    if card.is_clicked(mouse_pos, self.sum_dx, self.sum_dy):
-                        card.is_front = not card.is_front  # Flip the card on click
-                        print("Card clicked!")
+                    for card in self.game_objects:
+                        if card.is_clicked(mouse_pos, self.sum_dx, self.sum_dy):
+                            card.is_front = not card.is_front  # Flip the card on click
+        elif event.type == pygame.MOUSEMOTION and self.moving_around_board:
+            self.sum_dx += event.rel[0]
+            self.sum_dy += event.rel[1]
 
     def update(self):
         if self.state == "playing":
             for obj in self.game_objects:
                 obj.update()
-
-            if self.moving_around_board:
-                current_mouse_x, current_mouse_y = pygame.mouse.get_pos()
-
-                self.sum_dx += (current_mouse_x - self.prev_mouse_x) / 1.3
-                self.sum_dy += (current_mouse_y - self.prev_mouse_y) / 1.3
-
-                self.prev_mouse_x = current_mouse_x
-                self.prev_mouse_y = current_mouse_y
 
     def render(self):
         self.screen.fill((255, 255, 255))
