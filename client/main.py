@@ -23,6 +23,7 @@ class Card(pygame.sprite.Sprite):
         self.is_front = random.choice([False] * 5 + [False])
         self.zoom_scale = group.zoom_scale
         self.mouse_pos = (0, 0)
+        self.z_index = 0
         self.set_image()
 
     def set_image(self):
@@ -94,7 +95,7 @@ class CameraGroup(pygame.sprite.Group):
 
         screen_rect = self.display_surface.get_rect()
         s = 0
-        for sprite in self.sprites():
+        for sprite in sorted(self.sprites(), key= lambda x : x.z_index):
             if screen_rect.colliderect(sprite.rect):
                 s += 1
                 offset_pos = sprite.rect.topleft
@@ -147,6 +148,7 @@ class Game:
         self.is_holding_object = False
         self.moved_holding_object = False
         self.held_object = None
+        self.z_index_iota = 0
 
         v = 2
         with open('assets/all_cards.txt', 'r') as file:
@@ -201,18 +203,22 @@ class Game:
             elif event.button == 1:
                 self.is_holding_object = True
                 mouse_pos = event.pos
-                for obj in self.camera_group.sprites():
+                for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
                     if obj.is_clicked(mouse_pos):
+                        self.assign_z_index(obj)
                         self.held_object = obj
+                        break
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
                 if self.is_holding_object:
                     if not self.moved_holding_object:
                         mouse_pos = event.pos
                         # Check if the card was clicked
-                        for card in self.camera_group.sprites():
-                            if card.is_clicked(mouse_pos):
-                                card.flip()
+                        for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
+                            if obj.is_clicked(mouse_pos):
+                                self.assign_z_index(obj)
+                                obj.flip()
+                                break
                     self.is_holding_object = False
                     self.held_object = None
                     self.moved_holding_object = False
@@ -220,6 +226,10 @@ class Game:
                     self.moving_around_board = False
         elif event.type == pygame.MOUSEMOTION and self.moving_around_board:
             pass
+
+    def assign_z_index(self, obj):
+        obj.z_index = self.z_index_iota
+        self.z_index_iota += 1
 
     def handle_zoom(self, event):
         new_zoom = self.camera_group.zoom_scale + event.y * 0.05
