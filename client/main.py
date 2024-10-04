@@ -87,6 +87,8 @@ class CameraGroup(pygame.sprite.Group):
         super().__init__()
         self.display_surface = pygame.display.get_surface()
         self.zoom_scale = 1
+        self.rel_x = 0
+        self.rel_y = 0
 
     def custom_draw(self):
         self.display_surface.fill('#71ddee')
@@ -98,15 +100,24 @@ class CameraGroup(pygame.sprite.Group):
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
         scale_factor = new_zoom_scale
+        center_x = self.display_surface.get_size()[0] // 2 - self.rel_x
+        center_y = self.display_surface.get_size()[1] // 2 - self.rel_y
         for sprite in self.sprites():
             sprite.width = sprite.original_width * scale_factor
             sprite.height = sprite.original_height * scale_factor
-            center_x = self.display_surface.get_size()[0] // 2
-            center_y = self.display_surface.get_size()[1] // 2
-            pos_x = center_x + (sprite.x - center_x) * scale_factor
-            pos_y = center_y + (sprite.y - center_y) * scale_factor
+            print(center_x, center_y)
+            pos_x = center_x + (sprite.x - center_x) * scale_factor + self.rel_x
+            pos_y = center_y + (sprite.y - center_y) * scale_factor + self.rel_y
             sprite.pos = (pos_x, pos_y)
 
+
+    def move_camera(self, rel):
+        rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
+        self.rel_x += rel2[0]
+        self.rel_y += rel2[1]
+        for sprite in self.sprites():
+            sprite.pos = (sprite.pos[0] + rel2[0], sprite.pos[1] + rel2[1])
+            sprite.rect.move_ip(rel)
 
 class Game:
     WINDOW_WIDTH = 1280
@@ -160,12 +171,13 @@ class Game:
                 self.running = False
         if event.type == pygame.MOUSEMOTION:
             self.camera_group.mouse_pos = event.pos
+            if self.moving_around_board and pygame.key.get_mods() & pygame.KMOD_ALT:
+                self.camera_group.move_camera(event.rel)
         elif event.type == pygame.MOUSEWHEEL:
             self.handle_zoom(event)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1 and pygame.key.get_mods() & pygame.KMOD_ALT:
                 self.moving_around_board = True
-                self.prev_mouse_x, self.prev_mouse_y = pygame.mouse.get_pos()
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
                 if self.moving_around_board:
@@ -180,7 +192,7 @@ class Game:
             pass
 
     def handle_zoom(self, event):
-        new_zoom = self.camera_group.zoom_scale + event.y * 0.03
+        new_zoom = self.camera_group.zoom_scale + event.y * 0.05
         if 0.2 < new_zoom < 2.0:
             self.camera_group.zoom(new_zoom)
 
