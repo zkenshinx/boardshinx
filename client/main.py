@@ -116,8 +116,8 @@ class CameraGroup(pygame.sprite.Group):
         self.rel_x += rel2[0]
         self.rel_y += rel2[1]
         for sprite in self.sprites():
-            sprite.pos = (sprite.pos[0] + rel2[0], sprite.pos[1] + rel2[1])
             sprite.rect.move_ip(rel)
+            sprite.pos = sprite.rect.topleft
 
 class Game:
     WINDOW_WIDTH = 1280
