@@ -1,41 +1,11 @@
 import pygame, sys
 from random import randint
 
-# class Picture:
-#     """Represents a picture in the game."""
-#     def __init__(self, path, x, y, width, height):
-#         self.original_image = pygame.image.load(path)
-#         self.image = pygame.transform.scale(self.original_image, (width, height))
-#         self.x = x
-#         self.y = y
-#         self.width = width
-#         self.height = height
-# 
-#     def update(self):
-#         """Update logic for the picture (if needed)."""
-#         pass
-# 
-#     def render(self, screen, dx, dy):
-#         """Draw the picture on the screen."""
-#         screen.blit(self.image, (self.x + dx, self.y + dy))
-# 
-#     def set_scale(self, scale_factor):
-#         """Scale the image based on the zoom level."""
-#         new_size = (int(self.width * scale_factor), int(self.height * scale_factor))
-#         self.image = pygame.transform.scale(self.original_image, new_size)
-# 
-#     def to_json():
-#         return {
-#             "type": "picture",
-#             "x": self.x,
-#             "y": self.y,
-#             # "path": self.path
-#         }
-
-
-class Card:
+class Card(pygame.sprite.Sprite):
     """Represents a card in the game."""
-    def __init__(self, back_path, front_path, x, y, width, height):
+    def __init__(self, back_path, front_path, x, y, width, height, group):
+        super().__init__(group)
+        self.group = group
         self.original_back_image = pygame.image.load(back_path)
         self.original_front_image = pygame.image.load(front_path)
         self.original_width = width
@@ -44,15 +14,20 @@ class Card:
         self.height = height
         self.x = x
         self.y = y
+        self.pos = (x, y)
         self.is_front = False
         self.border_thickness = 5
         self.white_space = 15
         self.border_radius = 20
+        self.zoom_scale = group.zoom_scale
+        self.mouse_pos = (0, 0)
         self.create_images()
 
     def create_images(self):
         self.back_image = self.create_combined_image(self.original_back_image)
         self.front_image = self.create_combined_image(self.original_front_image)
+        self.set_image()
+        self.rect = self.back_image.get_rect(topleft = self.pos)
 
     def create_combined_image(self, original_image):
         """Create a new image combining the original image and its outline."""
@@ -76,25 +51,24 @@ class Card:
 
     # ... (rest of the methods remain unchanged)
     def update(self):
-        """Update logic for the card (if needed)."""
-        pass
+        if self.zoom_scale != self.group.zoom_scale:
+            self.zoom_scale = self.group.zoom_scale
+            # self.set_scale(self.zoom_scale)
+            self.create_images()
 
-    def render(self, screen, dx, dy):
-        """Draw the card on the screen."""
+    def set_image(self):
         if self.is_front:
-            screen.blit(self.front_image, (self.x + dx, self.y + dy))
+            self.image = self.front_image
         else:
-            screen.blit(self.back_image, (self.x + dx, self.y + dy))
+            self.image = self.back_image
 
-    def set_scale(self, scale_factor):
-        """Scale the image based on the zoom level."""
-        self.width = self.original_width * scale_factor
-        self.height = self.original_height * scale_factor
-        self.create_images()
+    def flip(self):
+        self.is_front = not self.is_front
+        self.set_image()
 
-    def is_clicked(self, mouse_pos, dx, dy):
+    def is_clicked(self, mouse_pos):
         """Check if the card was clicked based on the mouse position."""
-        rect = pygame.Rect(self.x + dx, self.y + dy, self.width, self.height)
+        rect = pygame.Rect(self.pos[0], self.pos[1], self.width, self.height)
         return rect.collidepoint(mouse_pos)
 
     def to_json(self):
@@ -104,6 +78,37 @@ class Card:
             "y": self.y
             # "path": "assets/
         }
+
+class CameraGroup(pygame.sprite.Group):
+    def __init__(self):
+        super().__init__()
+        self.display_surface = pygame.display.get_surface()
+
+        # camera offset 
+        self.offset = pygame.math.Vector2()
+
+        # zoom 
+        self.zoom_scale = 1
+
+    def custom_draw(self):
+        self.display_surface.fill('#71ddee')
+
+        for sprite in self.sprites():
+            offset_pos = sprite.rect.topleft
+            self.display_surface.blit(sprite.image,offset_pos)
+
+    def zoom(self, new_zoom_scale):
+        self.zoom_scale = new_zoom_scale
+        scale_factor = new_zoom_scale
+        for sprite in self.sprites():
+            sprite.width = sprite.original_width * scale_factor
+            sprite.height = sprite.original_height * scale_factor
+            center_x = self.display_surface.get_size()[0] // 2
+            center_y = self.display_surface.get_size()[1] // 2
+            pos_x = center_x + (sprite.x - center_x) * scale_factor
+            pos_y = center_y + (sprite.y - center_y) * scale_factor
+            sprite.pos = (pos_x, pos_y)
+
 
 class Game:
     WINDOW_WIDTH = 1280
@@ -119,37 +124,28 @@ class Game:
         self.running = True
         self.state = "playing"
 
-        # Initialize game objects
-        self.game_objects = []
+        self.camera_group = CameraGroup()
 
-        # Create and add the centered rectangle to game_objects
-        # rect_width = 1337
-        # rect_height = 866
-        # rect_x = (self.WINDOW_WIDTH - rect_width) // 2
-        # rect_y = (self.WINDOW_HEIGHT - rect_height) // 2
-        # rectangle = Picture("assets/sarpedon.webp", rect_x, rect_y, rect_width, rect_height)
-        # self.game_objects.append(rectangle)
-        for i in range(1):
-            for j in range(1):
+        for i in range(5):
+            for j in range(5):
                 hero = "tomoe-gozen"
-                card = Card(f"assets/{hero}/back.webp", f"assets/{hero}/deck/3x-skirmish.png", 230*i, 329*j, 230, 329)
-                self.game_objects.append(card)
+                back_path = f"assets/{hero}/back.webp"
+                front_path = f"assets/{hero}/deck/3x-skirmish.png"
+                card = Card(back_path, front_path, 230*i, 329*j, 230, 329, self.camera_group)
 
         # Initialize font for displaying mouse coordinates
         self.font = pygame.font.SysFont(None, 36)  # Default font and size
 
         # Initialize mouse position variables
-        self.sum_dx = 0
-        self.sum_dy = 0
         self.moving_around_board = False
-        self.zoom_scale = 1.0
 
     def run(self):
         """Main game loop."""
         while self.running:
             self.handle_events()
-            self.update()
-            self.render()
+            self.camera_group.update()
+            self.camera_group.custom_draw()
+            pygame.display.update()
             self.clock.tick(self.FPS)
 
     def handle_events(self):
@@ -164,15 +160,10 @@ class Game:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.running = False
+        if event.type == pygame.MOUSEMOTION:
+            self.camera_group.mouse_pos = event.pos
         elif event.type == pygame.MOUSEWHEEL:
-            # Zoom in and out
-            if event.y > 0 and self.zoom_scale < 2.0:  # Scroll up
-                self.zoom_scale *= 1.1  # Zoom in
-            elif event.y < 0 and self.zoom_scale > 0.2:  # Scroll down
-                self.zoom_scale /= 1.1  # Zoom out
-            # Scale all game objects based on the zoom level
-            for obj in self.game_objects:
-                obj.set_scale(self.zoom_scale)
+            self.handle_zoom(event)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1 and pygame.key.get_mods() & pygame.KMOD_ALT:
                 self.moving_around_board = True
@@ -184,28 +175,27 @@ class Game:
                 else:
                     mouse_pos = event.pos
                     # Check if the card was clicked
-                    for card in self.game_objects:
-                        if card.is_clicked(mouse_pos, self.sum_dx, self.sum_dy):
-                            card.is_front = not card.is_front  # Flip the card on click
+                    for card in self.camera_group.sprites():
+                        if card.is_clicked(mouse_pos):
+                            card.flip()
         elif event.type == pygame.MOUSEMOTION and self.moving_around_board:
-            self.sum_dx += event.rel[0]
-            self.sum_dy += event.rel[1]
+            pass
 
-    def update(self):
-        if self.state == "playing":
-            for obj in self.game_objects:
-                obj.update()
+    def handle_zoom(self, event):
+        new_zoom = self.camera_group.zoom_scale + event.y * 0.03
+        if 0.2 < new_zoom < 2.0:
+            self.camera_group.zoom(new_zoom)
 
     def render(self):
         self.screen.fill((255, 255, 255))
 
         if self.state == "playing":
             for obj in self.game_objects:
-                obj.render(self.screen, self.sum_dx, self.sum_dy)
+                obj.render(self.screen)
 
             mouse_x, mouse_y = pygame.mouse.get_pos()
 
-            coord_text = f"({mouse_x - self.sum_dx}, {mouse_y - self.sum_dy}), Zoom: {self.zoom_scale}"
+            # coord_text = f"({mouse_x - self.sum_dx}, {mouse_y - self.sum_dy}), Zoom: {self.zoom_scale}"
             coord_surface = self.font.render(coord_text, True, (0, 0, 0))
             self.screen.blit(coord_surface, (10, 10))
 
