@@ -26,7 +26,7 @@ class Card(pygame.sprite.Sprite, Zoomable):
         self.pos = (x, y)
         self.is_front = False
         self.z_index = 0
-
+        self.render = True
         self._type = "card"
         self.draggable = True
 
@@ -102,7 +102,7 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         self._type = "card_deck"
         self.draggable = False
         self.deck = []
-
+        self.render = True
         self.last_focused = True
         self.is_focused = False
         self.create_deck_display()
@@ -112,7 +112,7 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         #     return
         # self.last_focused = self.is_focused
         
-        print(self.height, self.width)
+        # TODO: change to width and height
         border_thickness = int((self.height + 99) / 100)
         border_radius = int((self.width + 19) / 20)
         surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
@@ -174,8 +174,9 @@ class CameraGroup(pygame.sprite.Group):
         self.display_surface.fill('#71ddee')
 
         screen_rect = self.display_surface.get_rect()
-        for sprite in sorted(self.sprites(), key= lambda x : x.z_index):
+        for sprite in sorted([s for s in self.sprites() if s.render == True], key= lambda x : x.z_index):
             if screen_rect.colliderect(sprite.rect):
+                sprite.update_zoom()
                 offset_pos = sprite.rect.topleft
                 self.display_surface.blit(sprite.display,offset_pos)
 
@@ -184,7 +185,11 @@ class CameraGroup(pygame.sprite.Group):
         scale_factor = new_zoom_scale
         center_x = self.display_surface.get_size()[0] // 2 - self.rel_x
         center_y = self.display_surface.get_size()[1] // 2 - self.rel_y
-        for sprite in self.sprites():
+        order_priority = {
+            "card": 1,
+            "card_deck": 2
+        }
+        for sprite in sorted(self.sprites(), key=lambda x : order_priority[x._type]):
             sprite.width = sprite.original_width * scale_factor
             sprite.height = sprite.original_height * scale_factor
             pos_x = center_x + (sprite.x - center_x) * scale_factor + self.rel_x
@@ -241,7 +246,7 @@ class Game:
             for j in range(v):
                 back_path = f"assets/{random.choice(all_cards_back)}"
                 front_path = f"assets/{random.choice(all_cards_front)}"
-                card = Card(back_path, front_path, 230*i, 329*j, 230 / 1.4, 329 / 1.4, self.camera_group)
+                card = Card(back_path, front_path, 230*i/1.39, 329*j/1.39, 230 / 1.4, 329 / 1.4, self.camera_group)
                 # index = j + i * v
                 # back_path = f"assets/{hero}/back.webp"
                 # front_path = f"assets/{hero}/deck/{deck[index % len(deck)]}"
@@ -321,7 +326,8 @@ class Game:
                             if pygame.sprite.collide_rect(self.held_object, card_deck):
                                 card_deck.mark_focused(False)
                                 card_deck.add_card(self.held_object)
-                                self.camera_group.remove(self.held_object)
+                                self.held_object.render = False
+                                # self.camera_group.remove(self.held_object)
 
                 self.is_holding_object = False
                 self.held_object = None
