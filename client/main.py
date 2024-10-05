@@ -157,6 +157,12 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         last.render = True
         return last
 
+    def flip_top(self):
+        if len(self.deck) == 0:
+            return
+        self.deck[-1].flip()
+        self.create_deck_display()
+
     def mark_focused(self, is_focused):
         self.is_focused = is_focused
         self.create_deck_display()
@@ -303,7 +309,15 @@ class Game:
         if self.moving_around_board and pygame.key.get_mods() & pygame.KMOD_ALT:
             self.camera_group.move_camera(event.rel)
         elif self.is_holding_object and self.held_object is not None:
-            self.move_held_object(event)
+            if self.held_object._type == 'card_deck':
+                card_deck = self.held_object
+                self.held_object = card_deck.pop_card()
+                if self.held_object is not None:
+                    self.camera_group.move_sprite_to(self.held_object, card_deck.x, card_deck.y)
+                    self.assign_z_index(self.held_object)
+                    self.move_held_object(event)
+            else:
+                self.move_held_object(event)
         else: # Just moving
             # Check collision with card_deck
             mouse_pos = event.pos
@@ -323,16 +337,11 @@ class Game:
                 # Check if card deck was clicked
                 if pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
                     if obj._type == 'card_deck':
-                        self.held_object = obj.pop_card()
-                        if self.held_object is not None:
-                            print(obj.x, obj.y)
-                            self.camera_group.move_sprite_to(self.held_object, obj.x, obj.y)
-                            self.assign_z_index(self.held_object)
+                        self.held_object = obj
                         break
                     elif obj.draggable:
                         self.assign_z_index(obj)
                         self.held_object = obj
-                        print(self.held_object.x, self.held_object.y)
                         break
 
     def mouse_button_up(self, event):
@@ -341,11 +350,14 @@ class Game:
                 if not self.moved_holding_object:
                     mouse_pos = event.pos
                     # Check if the card was clicked
-                    for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
-                        if obj._type == "card" and pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
-                            self.assign_z_index(obj)
-                            obj.flip()
-                            break
+                    for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
+                        if pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
+                            if obj._type == "card_deck":
+                                obj.flip_top()
+                            elif obj._type == "card":
+                                self.assign_z_index(obj)
+                                obj.flip()
+                                break
                 else:
                     if self.held_object._type == "card":
                         # Check collission with all card decks
