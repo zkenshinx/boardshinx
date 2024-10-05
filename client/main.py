@@ -4,7 +4,11 @@ from random import randint
 from functools import lru_cache
 import random
 
-class Card(pygame.sprite.Sprite):
+class Zoomable:
+    def update_zoom(self):
+        pass
+
+class Card(pygame.sprite.Sprite, Zoomable):
 
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height, group):
@@ -20,31 +24,38 @@ class Card(pygame.sprite.Sprite):
         self.x = x
         self.y = y
         self.pos = (x, y)
-        self.is_front = random.choice([False] * 5 + [False])
-        self.zoom_scale = group.zoom_scale
-        self.mouse_pos = (0, 0)
+        self.is_front = False
         self.z_index = 0
+
+        self._type = "card"
+        self.draggable = True
+
         self.set_image()
 
     def set_image(self):
         if self.is_front:
-            self.image = Card.create_combined_image(self.front_image_path, self.width, self.height)
-            self.rect = self.image.get_rect(topleft = self.pos)
+            self.display = Card.create_combined_image(self.front_image_path, self.width, self.height)
+            self.rect = self.display.get_rect(topleft = self.pos)
         else:
-            self.image = Card.create_combined_image(self.back_image_path, self.width, self.height)
-            self.rect = self.image.get_rect(topleft = self.pos)
+            self.display = Card.create_combined_image(self.back_image_path, self.width, self.height)
+            self.rect = self.display.get_rect(topleft = self.pos)
 
     @staticmethod
     @lru_cache(maxsize=256)
     def create_combined_image(image_path, width, height):
         """Create a new image combining the original image and its outline."""
-        border_thickness = 5
-        white_space = 15
-        border_radius = 20
+        border_thickness = 2
+        white_space = int(height * 0.05)
+        border_radius = int((width + 19) / 20)
+        width -= 2 * border_thickness
+        height -= 2 * border_thickness + 2 * white_space
+        # border_thickness = int((height + 99) / 100)
+        # white_space = int((height + 19) / 20)
+        # border_radius = int((width + 19) / 20)
         image = pygame.image.load(image_path).convert_alpha()
         scaled_image = pygame.transform.smoothscale(image, (width, height))
         combined_surface = pygame.Surface((width + 2 * border_thickness, 
-                                            height + 2 * white_space + border_thickness), 
+                                            height + 2 * white_space + 2 * border_thickness), 
                                            pygame.SRCALPHA)
         
         # Draw a filled rectangle with rounded corners
@@ -60,19 +71,12 @@ class Card(pygame.sprite.Sprite):
         combined_surface.blit(scaled_image, (border_thickness, white_space))
         return combined_surface
 
-    def update(self):
-        if self.zoom_scale != self.group.zoom_scale:
-            self.zoom_scale = self.group.zoom_scale
-            self.set_image()
+    def update_zoom(self):
+        self.set_image()
 
     def flip(self):
         self.is_front = not self.is_front
         self.set_image()
-
-    def is_clicked(self, mouse_pos):
-        """Check if the card was clicked based on the mouse position."""
-        rect = pygame.Rect(self.pos[0], self.pos[1], self.width, self.height)
-        return rect.collidepoint(mouse_pos)
 
     def to_json(self):
         return {
@@ -81,6 +85,82 @@ class Card(pygame.sprite.Sprite):
             "y": self.y
             # "path": "assets/
         }
+
+class CardDeck(pygame.sprite.Sprite, Zoomable):
+    """Represents a card deck in the game."""
+    def __init__(self, x, y, width, height, group):
+        super().__init__(group)
+        self.group = group
+        self.original_width = width
+        self.original_height = height
+        self.width = width
+        self.height = height
+        self.x = x
+        self.y = y
+        self.pos = (x, y)
+        self.z_index = 0
+        self._type = "card_deck"
+        self.draggable = False
+        self.deck = []
+
+        self.last_focused = True
+        self.is_focused = False
+        self.create_deck_display()
+
+    def create_deck_display(self):
+        # if self.is_focused == self.last_focused: # Optimization
+        #     return
+        # self.last_focused = self.is_focused
+        
+        print(self.height, self.width)
+        border_thickness = int((self.height + 99) / 100)
+        border_radius = int((self.width + 19) / 20)
+        surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        
+        # Draw white fill
+        pygame.draw.rect(surface, (255, 255, 255),
+                         (0, 0, surface.get_width(), surface.get_height()), 
+                         border_radius=border_radius)
+        
+        # Draw black border
+        pygame.draw.rect(surface, (0, 0, 0),
+                         (0, 0, surface.get_width(), surface.get_height()), 
+                         width=border_thickness, border_radius=border_radius)
+
+        # Add top of card
+        if len(self.deck) > 0:
+            top_card = self.deck[-1]
+            top_card_x = (self.width - top_card.width) // 2
+            top_card_y = (self.height - top_card.height) // 2
+            print(self.height, top_card.height)
+            surface.blit(top_card.display, (top_card_x, top_card_y))
+
+
+        if self.is_focused:
+            gray_overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            gray_overlay.fill((128, 128, 128, 80))
+            surface.blit(gray_overlay, (0, 0))
+        
+        self.display = surface
+        self.rect = self.display.get_rect(topleft = self.pos)
+
+    def add_card(self, card):
+        self.deck.append(card)
+        self.create_deck_display()
+
+    def get_card(self, card):
+        if len(self.deck) == 0:
+            return None
+        last = self.deck[-1]
+        self.deck = self.deck[:-1]
+        return last
+
+    def mark_focused(self, is_focused):
+        self.is_focused = is_focused
+        self.create_deck_display()
+
+    def update_zoom(self):
+        self.create_deck_display()
 
 class CameraGroup(pygame.sprite.Group):
     def __init__(self):
@@ -94,13 +174,10 @@ class CameraGroup(pygame.sprite.Group):
         self.display_surface.fill('#71ddee')
 
         screen_rect = self.display_surface.get_rect()
-        s = 0
         for sprite in sorted(self.sprites(), key= lambda x : x.z_index):
             if screen_rect.colliderect(sprite.rect):
-                s += 1
                 offset_pos = sprite.rect.topleft
-                self.display_surface.blit(sprite.image,offset_pos)
-        print(s)
+                self.display_surface.blit(sprite.display,offset_pos)
 
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
@@ -113,6 +190,7 @@ class CameraGroup(pygame.sprite.Group):
             pos_x = center_x + (sprite.x - center_x) * scale_factor + self.rel_x
             pos_y = center_y + (sprite.y - center_y) * scale_factor + self.rel_y
             sprite.pos = (pos_x, pos_y)
+            sprite.update_zoom()
 
     def move_camera(self, rel):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
@@ -150,9 +228,11 @@ class Game:
         self.held_object = None
         self.z_index_iota = 0
 
+        card_deck = CardDeck(250, 250, 230 / 1.3, 330 / 1.3, self.camera_group)
+
         v = 2
         with open('assets/all_cards.txt', 'r') as file:
-            all_cards_front = [f.strip() for f in file.readlines()][:1]
+            all_cards_front = [f.strip() for f in file.readlines()]
         with open('assets/all_back.txt', 'r') as file:
             all_cards_back = [f.strip() for f in file.readlines()]
         # hero = "tomoe-gozen"
@@ -186,46 +266,82 @@ class Game:
 
     def handle_input(self, event):
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.running = False
+            self.key_down(event)
         if event.type == pygame.MOUSEMOTION:
-            self.camera_group.mouse_pos = event.pos
-            if self.moving_around_board and pygame.key.get_mods() & pygame.KMOD_ALT:
-                self.camera_group.move_camera(event.rel)
-            if self.is_holding_object and self.held_object is not None:
-                self.moved_holding_object = True
-                self.camera_group.move_sprite(self.held_object, event.rel)
+            self.mouse_motion(event)
         elif event.type == pygame.MOUSEWHEEL:
             self.handle_zoom(event)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1 and pygame.key.get_mods() & pygame.KMOD_ALT:
-                self.moving_around_board = True
-            elif event.button == 1:
-                self.is_holding_object = True
-                mouse_pos = event.pos
-                for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
-                    if obj.is_clicked(mouse_pos):
-                        self.assign_z_index(obj)
-                        self.held_object = obj
-                        break
+            self.mouse_button_down(event)
         elif event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1:
-                if self.is_holding_object:
-                    if not self.moved_holding_object:
-                        mouse_pos = event.pos
-                        # Check if the card was clicked
-                        for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
-                            if obj.is_clicked(mouse_pos):
-                                self.assign_z_index(obj)
-                                obj.flip()
-                                break
-                    self.is_holding_object = False
-                    self.held_object = None
-                    self.moved_holding_object = False
-                elif self.moving_around_board:
-                    self.moving_around_board = False
+            self.mouse_button_up(event)
         elif event.type == pygame.MOUSEMOTION and self.moving_around_board:
             pass
+
+    def key_down(self, event):
+        if event.key == pygame.K_ESCAPE:
+            self.running = False
+
+    def mouse_motion(self, event):
+        self.camera_group.mouse_pos = event.pos
+        if self.moving_around_board and pygame.key.get_mods() & pygame.KMOD_ALT:
+            self.camera_group.move_camera(event.rel)
+        if self.is_holding_object and self.held_object is not None:
+            self.move_held_object(event)
+
+    def mouse_button_down(self, event):
+        if event.button == 1 and pygame.key.get_mods() & pygame.KMOD_ALT:
+            self.moving_around_board = True
+        elif event.button == 1:
+            self.is_holding_object = True
+            mouse_pos = event.pos
+            for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
+                if obj.draggable and pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
+                    self.assign_z_index(obj)
+                    self.held_object = obj
+                    break
+
+    def mouse_button_up(self, event):
+        if event.button == 1:
+            if self.is_holding_object:
+                if not self.moved_holding_object:
+                    mouse_pos = event.pos
+                    # Check if the card was clicked
+                    for obj in sorted(self.camera_group.sprites(), key=lambda x: -x.z_index):
+                        if obj._type == "card" and pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
+                            self.assign_z_index(obj)
+                            obj.flip()
+                            break
+                else:
+                    if self.held_object._type == "card":
+                        # Check collission with all card decks
+                        # TODO: optimize this
+                        card_decks = [item for item in self.camera_group.sprites() if item._type == "card_deck"]
+                        for card_deck in card_decks:
+                            if pygame.sprite.collide_rect(self.held_object, card_deck):
+                                card_deck.mark_focused(False)
+                                card_deck.add_card(self.held_object)
+                                self.camera_group.remove(self.held_object)
+
+                self.is_holding_object = False
+                self.held_object = None
+                self.moved_holding_object = False
+            elif self.moving_around_board:
+                self.moving_around_board = False
+
+    def move_held_object(self, event):
+        self.moved_holding_object = True
+        self.camera_group.move_sprite(self.held_object, event.rel)
+        # Check if it's card and it goes into card deck
+        if self.held_object._type == "card":
+            # Check collission with all card decks
+            # TODO: optimize this
+            card_decks = [item for item in self.camera_group.sprites() if item._type == "card_deck"]
+            for card_deck in card_decks:
+                if pygame.sprite.collide_rect(self.held_object, card_deck):
+                    card_deck.mark_focused(True)
+                else:
+                    card_deck.mark_focused(False)
 
     def assign_z_index(self, obj):
         obj.z_index = self.z_index_iota
@@ -233,7 +349,7 @@ class Game:
 
     def handle_zoom(self, event):
         new_zoom = self.camera_group.zoom_scale + event.y * 0.05
-        if 0.2 < new_zoom < 2.0:
+        if 0.5 < new_zoom < 1.7:
             self.camera_group.zoom(new_zoom)
 
     def quit(self):
