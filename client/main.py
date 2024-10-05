@@ -13,18 +13,15 @@ class Card(pygame.sprite.Sprite, Zoomable):
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height, group):
         super().__init__(group)
+        self.original_rect = pygame.rect.Rect(x, y, width, height)
+        self.rect = pygame.rect.Rect(x, y, width, height)
         self.group = group
         self.back_image_path = back_path
         self.front_image_path = front_path
 
         self.original_width = width
         self.original_height = height
-        self.width = width
-        self.height = height
-        self.x = x
-        self.y = y
-        self.pos = (x, y)
-        self.is_front = False
+        self.is_front = random.choice([False] * 2 + [True])
         self.z_index = 0
         self.render = True
         self._type = "card"
@@ -34,11 +31,9 @@ class Card(pygame.sprite.Sprite, Zoomable):
 
     def set_image(self):
         if self.is_front:
-            self.display = Card.create_combined_image(self.front_image_path, self.width, self.height)
-            self.rect = self.display.get_rect(topleft = self.pos)
+            self.display = Card.create_combined_image(self.front_image_path, self.rect.width, self.rect.height)
         else:
-            self.display = Card.create_combined_image(self.back_image_path, self.width, self.height)
-            self.rect = self.display.get_rect(topleft = self.pos)
+            self.display = Card.create_combined_image(self.back_image_path, self.rect.width, self.rect.height)
 
     @staticmethod
     @lru_cache(maxsize=4096)
@@ -47,16 +42,14 @@ class Card(pygame.sprite.Sprite, Zoomable):
         border_thickness = 2
         white_space = int(height * 0.05)
         border_radius = int((width + 19) / 20)
-        width -= 2 * border_thickness
-        height -= 2 * border_thickness + 2 * white_space
         # border_thickness = int((height + 99) / 100)
         # white_space = int((height + 19) / 20)
         # border_radius = int((width + 19) / 20)
         image = pygame.image.load(image_path).convert_alpha()
-        scaled_image = pygame.transform.smoothscale(image, (width, height))
-        combined_surface = pygame.Surface((width + 2 * border_thickness, 
-                                            height + 2 * white_space + 2 * border_thickness), 
-                                           pygame.SRCALPHA)
+        scaled_width = width - 2 * border_thickness
+        scaled_height = height - (2 * border_thickness + 2 * white_space)
+        scaled_image = pygame.transform.smoothscale(image, (scaled_width, scaled_height))
+        combined_surface = pygame.Surface((width, height), pygame.SRCALPHA)
         
         # Draw a filled rectangle with rounded corners
         pygame.draw.rect(combined_surface, (255, 255, 255),  # White fill
@@ -93,11 +86,8 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         self.group = group
         self.original_width = width
         self.original_height = height
-        self.width = width
-        self.height = height
-        self.x = x
-        self.y = y
-        self.pos = (x, y)
+        self.original_rect = pygame.rect.Rect(x, y, width, height)
+        self.rect = pygame.rect.Rect(x, y, width, height)
         self.z_index = 0
         self._type = "card_deck"
         self.draggable = False
@@ -113,9 +103,9 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         # self.last_focused = self.is_focused
         
         # TODO: change to width and height
-        border_thickness = int((self.height + 99) / 100)
-        border_radius = int((self.width + 19) / 20)
-        surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        border_thickness = int((self.rect.height + 99) / 100)
+        border_radius = int((self.rect.width + 19) / 20)
+        surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         
         # Draw white fill
         pygame.draw.rect(surface, (255, 255, 255),
@@ -130,18 +120,17 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         # Add top of card
         if len(self.deck) > 0:
             top_card = self.deck[-1]
-            top_card_x = (self.width - top_card.width) // 2
-            top_card_y = (self.height - top_card.height) // 2
+            top_card_x = (self.rect.width - top_card.rect.width) // 2
+            top_card_y = (self.rect.height - top_card.rect.height) // 2
             surface.blit(top_card.display, (top_card_x, top_card_y))
 
 
         if self.is_focused:
-            gray_overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
             gray_overlay.fill((128, 128, 128, 80))
             surface.blit(gray_overlay, (0, 0))
         
         self.display = surface
-        self.rect = self.display.get_rect(topleft = self.pos)
 
     def add_card(self, card):
         card.render = False
@@ -182,9 +171,14 @@ class CameraGroup(pygame.sprite.Group):
         self.display_surface.fill('#71ddee')
 
         screen_rect = self.display_surface.get_rect()
+        screen_rect.x = (screen_rect.x - self.rel_x)
+        screen_rect.y = (screen_rect.y - self.rel_y)
+        screen_rect.width  /= self.zoom_scale
+        screen_rect.height /= self.zoom_scale
         for sprite in sorted([s for s in self.sprites() if s.render], key= lambda x : x.z_index):
-            if screen_rect.colliderect(sprite.rect):
-                offset_pos = sprite.rect.topleft
+            if screen_rect.colliderect(sprite.original_rect):
+                topleft = sprite.rect.topleft
+                offset_pos = ((topleft[0] + self.rel_x) * self.zoom_scale, (topleft[1] + self.rel_y) * self.zoom_scale)
                 self.display_surface.blit(sprite.display,offset_pos)
 
     def zoom(self, new_zoom_scale):
@@ -201,31 +195,32 @@ class CameraGroup(pygame.sprite.Group):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
         self.rel_x += rel2[0]
         self.rel_y += rel2[1]
-        for sprite in self.sprites():
-            sprite.rect.move_ip(rel)
-            sprite.pos = sprite.rect.topleft
 
     def move_sprite_rel(self, sprite, rel):
+        sprite.original_rect.move_ip(rel)
         sprite.rect.move_ip(rel)
-        sprite.x += rel[0]
-        sprite.y += rel[1]
-        sprite.pos = sprite.rect.topleft
 
     def move_sprite_to(self, sprite, x, y):
-        sprite.rect.update(x, y, sprite.rect.width, sprite.rect.height)
-        sprite.x = x
-        sprite.y = y
-        sprite.pos = sprite.rect.topleft
+        sprite.original_rect.x = x
+        sprite.original_rect.y = y
+        sprite.rect.x = x
+        sprite.rect.y = y
 
     def update_sprite_pos(self, sprite):
         scale_factor = self.zoom_scale
         center_x = self.display_surface.get_size()[0] // 2 - self.rel_x
         center_y = self.display_surface.get_size()[1] // 2 - self.rel_y
-        sprite.width = sprite.original_width * scale_factor
-        sprite.height = sprite.original_height * scale_factor
-        pos_x = center_x + (sprite.x - center_x) * scale_factor + self.rel_x
-        pos_y = center_y + (sprite.y - center_y) * scale_factor + self.rel_y
-        sprite.pos = (pos_x, pos_y)
+        sprite.rect.width = sprite.original_width * scale_factor
+        sprite.rect.height = sprite.original_height * scale_factor
+        pos_x = center_x + (sprite.original_rect.x - center_x) * scale_factor + self.rel_x
+        pos_y = center_y + (sprite.original_rect.y - center_y) * scale_factor + self.rel_y
+
+    def collidepoint(self, rect, mouse_pos):
+        scaled_mouse_pos = (
+            (mouse_pos[0] / self.zoom_scale) - self.rel_x,
+            (mouse_pos[1] / self.zoom_scale) - self.rel_y
+        )
+        return rect.collidepoint(scaled_mouse_pos)
 
 class Game:
     WINDOW_WIDTH = 1280
@@ -253,7 +248,7 @@ class Game:
 
         card_deck = CardDeck(250, 250, 230 / 1.3, 330 / 1.3, self.camera_group)
 
-        v = 2
+        v = 44
         with open('assets/all_cards.txt', 'r') as file:
             all_cards_front = [f.strip() for f in file.readlines()]
         with open('assets/all_back.txt', 'r') as file:
@@ -313,7 +308,7 @@ class Game:
                 card_deck = self.held_object
                 self.held_object = card_deck.pop_card()
                 if self.held_object is not None:
-                    self.camera_group.move_sprite_to(self.held_object, card_deck.x, card_deck.y)
+                    self.camera_group.move_sprite_to(self.held_object, card_deck.original_rect.x, card_deck.rect.y)
                     self.assign_z_index(self.held_object)
                     self.move_held_object(event)
             else:
@@ -322,7 +317,7 @@ class Game:
             # Check collision with card_deck
             mouse_pos = event.pos
             for card_deck in self.get_card_decks():
-                if card_deck.rect.collidepoint(mouse_pos):
+                if self.camera_group.collidepoint(card_deck.original_rect, mouse_pos):
                     card_deck.mark_focused(True)
                 else:
                     card_deck.mark_focused(False)
@@ -335,7 +330,8 @@ class Game:
             mouse_pos = event.pos
             for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
                 # Check if card deck was clicked
-                if pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
+                if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
+                    print(obj.original_rect, mouse_pos)
                     if obj._type == 'card_deck':
                         self.held_object = obj
                         break
@@ -351,7 +347,7 @@ class Game:
                     mouse_pos = event.pos
                     # Check if the card was clicked
                     for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
-                        if pygame.Rect(obj.pos[0], obj.pos[1], obj.width, obj.height).collidepoint(mouse_pos):
+                        if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
                             if obj._type == "card_deck":
                                 obj.flip_top()
                             elif obj._type == "card":
