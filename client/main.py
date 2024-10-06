@@ -74,6 +74,10 @@ class Card(pygame.sprite.Sprite, Zoomable):
     def update_zoom(self):
         self.set_image()
 
+    def assign_front(self, is_front):
+        self.is_front = is_front
+        self.set_image()
+
     def flip(self):
         self.is_front = not self.is_front
         self.set_image()
@@ -176,7 +180,8 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         self.create_deck_display()
 
 class PlayerHand(pygame.sprite.Sprite, Zoomable):
-    def __init__(self, group):
+    def __init__(self, group, game):
+        self.game = game
         self.group = group
         self._type = "player_hand"
         self.draggable = False
@@ -210,13 +215,17 @@ class PlayerHand(pygame.sprite.Sprite, Zoomable):
                          (0, 0, surface.get_width(), surface.get_height()), 
                          width=border_thickness, border_radius=border_radius)
 
-        # Add top of card
-        if len(self.deck) > 0:
-            top_card = self.deck[-1]
-            top_card_x = (self.rect.width - top_card.rect.width) // 2
-            top_card_y = (self.rect.height - top_card.rect.height) // 2
-            surface.blit(top_card.display, (top_card_x, top_card_y))
-
+        self.game.assign_z_index(self)
+        margin = 10
+        for i in range(len(self.deck)):
+            card = self.deck[i]
+            start_x = (x - self.group.zoom_scale * self.group.rel_x) / self.group.zoom_scale
+            start_y = (y - self.group.zoom_scale * self.group.rel_y) / self.group.zoom_scale
+            card.rect.x = start_x + (i + 1) * margin + i * card.rect.width / self.group.zoom_scale
+            card.rect.y = start_y + 7
+            card.original_rect.x = card.rect.x
+            card.original_rect.y = card.rect.y
+            self.game.assign_z_index(card)
 
         if self.is_focused:
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
@@ -225,11 +234,19 @@ class PlayerHand(pygame.sprite.Sprite, Zoomable):
         
         self.display = surface
 
-
     def add_card(self, card):
-        card.render = False
-        self.deck.append(card)
-        self.create_hand_display()
+        if card not in self.deck:
+            if not card.is_front:
+                card.flip()
+            self.deck.append(card)
+            self.create_hand_display()
+
+    def remove_card(self, card):
+        if card in self.deck:
+            if card.is_front:
+                card.flip()
+            self.deck.remove(card)
+            self.create_hand_display()
 
     def mark_focused(self, is_focused):
         self.is_focused = is_focused
@@ -358,7 +375,7 @@ class Game:
         #self.save_game_state()
         self.load_game_state()
 
-        self.player_hand = PlayerHand(self.camera_group)
+        self.player_hand = PlayerHand(self.camera_group, self)
         self.player_hand._id = "player_hand"
         self.camera_group.add_player_hand(self.player_hand)
         self.assign_z_index(self.player_hand)
@@ -418,7 +435,7 @@ class Game:
         self.camera_group.mouse_pos = event.pos
         if self.moving_around_board and pygame.key.get_mods() & pygame.KMOD_ALT:
             self.camera_group.move_camera(event.rel)
-            self.assign_z_index(self.player_hand)
+            self.player_hand.create_hand_display()
         elif self.is_holding_object and self.held_object is not None:
             if self.held_object._type == 'card_deck':
                 card_deck = self.held_object
@@ -427,8 +444,11 @@ class Game:
                     self.camera_group.move_sprite_to(self.held_object, card_deck.original_rect.x, card_deck.rect.y)
                     self.move_held_object(event)
             else:
+                if self.held_object in self.player_hand.deck:
+                    self.remove_card_from_hand(self.held_object)
                 self.move_held_object(event)
         else: # Just moving
+            # TODO: I don't like this else code snippet
             # Check collision with card_deck
             mouse_pos = event.pos
             for card_deck in self.get_card_decks():
@@ -450,7 +470,7 @@ class Game:
                         self.held_object = obj
                         break
                     elif obj.draggable:
-                        self.assign_z_index(obj)
+                        self.assign_inf_z_index(obj)
                         self.held_object = obj
                         break
 
@@ -464,10 +484,15 @@ class Game:
                         # Check collission with all card decks
                         # TODO: optimize this
                         card_decks = [item for item in self.camera_group.sprites() if item._type == "card_deck"]
+                        collided_with_card_deck = False
                         for card_deck in card_decks:
                             if pygame.sprite.collide_rect(self.held_object, card_deck):
                                 self.add_card_to_card_deck(card_deck, self.held_object)
+                                collided_with_card_deck = True
                                 break
+                        if not collided_with_card_deck:
+                            if self.check_collide_with_hand(self.held_object):
+                                self.add_card_to_hand(self.held_object)
                 self.is_holding_object = False
                 self.held_object = None
                 self.moved_holding_object = False
@@ -477,6 +502,7 @@ class Game:
     def move_held_object(self, event):
         self.moved_holding_object = True
         self.camera_group.move_sprite_rel(self.held_object, event.rel)
+        self.assign_inf_z_index(self.held_object)
         # Check if it's card and it goes into card deck
         if self.held_object._type == "card":
             # Check collission with all card decks
@@ -485,6 +511,8 @@ class Game:
                     self.set_card_deck_focus(card_deck, True)
                 else:
                     self.set_card_deck_focus(card_deck, False)
+            self.check_collide_with_hand(self.held_object)
+
         # also broadcast
         message = {
             "action": "move_object",
@@ -493,6 +521,17 @@ class Game:
             "y": self.held_object.original_rect.y
         }
         send_to_server(message)
+
+    def check_collide_with_hand(self, card):
+        card_rect = self.held_object.rect.copy()
+        card_rect.x = (card_rect.x + self.camera_group.rel_x) * self.camera_group.zoom_scale
+        card_rect.y = (card_rect.y + self.camera_group.rel_y) * self.camera_group.zoom_scale
+        if card_rect.colliderect(self.player_hand.rect):
+            self.player_hand.mark_focused(True)
+            return True
+        else:
+            self.player_hand.mark_focused(False)
+            return False
 
     def check_click_on_object(self, event):
         mouse_pos = event.pos
@@ -511,6 +550,10 @@ class Game:
             obj.z_index = self.z_index_iota
             self.z_index_iota += 1
 
+    def assign_inf_z_index(self, obj):
+        if obj is not None:
+            obj.z_index = float('inf')
+
     def handle_zoom(self, event):
         next_zoom_index = self.zoom_index + event.y
         if 0 <= next_zoom_index < len(self.zooms):
@@ -518,7 +561,6 @@ class Game:
             self.camera_group.zoom(self.zooms[self.zoom_index])
             # Player hand
             self.player_hand.create_hand_display()
-            self.assign_z_index(self.player_hand)
 
     def get_card_decks(self):
         # TODO: optimize this
@@ -556,6 +598,27 @@ class Game:
                 "action": "add_card_to_card_deck",
                 "card_id": card._id,
                 "card_deck_id": card_deck._id
+            }
+            send_to_server(message)
+
+    def add_card_to_hand(self, card, send_message=True):
+        self.player_hand.mark_focused(False)
+        self.player_hand.add_card(card)
+        if send_message:
+            message = {
+                "action": "add_card_to_hand",
+                "object_id": card._id
+            }
+            send_to_server(message)
+
+    def remove_card_from_hand(self, card, send_message=True):
+        self.player_hand.mark_focused(False)
+        self.player_hand.remove_card(card)
+        card.render = True
+        if send_message:
+            message = {
+                "action": "remove_card_from_hand",
+                "object_id": card._id
             }
             send_to_server(message)
 
@@ -626,6 +689,14 @@ class Game:
         elif message["action"] == "shuffle_card_deck":
             card_deck = self.mp[message["card_deck_id"]]
             card_deck.shuffle([self.mp[card_id] for card_id in message["deck"]])
+        elif message["action"] == "add_card_to_hand":
+            obj = self.mp[message["object_id"]]
+            obj.assign_front(True)
+            obj.render = False
+        elif message["action"] == "remove_card_from_hand":
+            obj = self.mp[message["object_id"]]
+            obj.assign_front(False)
+            obj.render = True
 
     def save_game_state(self):
         game_state = []
@@ -694,9 +765,9 @@ def init_networking():
     sock.setblocking(False)
     return sock
 
-SERVER_IP = '16.171.34.99'
-SERVER_PORT = 23456
 SERVER_IP = 'localhost'
+SERVER_PORT = 23456
+SERVER_IP = '51.20.12.105'
 SERVER_PORT = 23456
 BUFFER_SIZE = 1024
 sock = init_networking()
