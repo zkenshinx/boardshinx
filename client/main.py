@@ -1,3 +1,4 @@
+from uuid import uuid4
 import json
 import hashlib
 
@@ -320,33 +321,34 @@ class Game:
         self.zooms = [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
 
         self.mp = {}
-        card_width = 230 / 1.3
-        card_height = 330 / 1.3
-        card_deck = CardDeck(250, 250, card_width, card_height, self.camera_group)
-        card_deck._id = hash_string("card_deck")
-        self.mp[card_deck._id] = card_deck
+
+        #card_width = 230 / 1.3
+        #card_height = 330 / 1.3
+        #card_deck = CardDeck(0, 0, card_width, card_height, self.camera_group)
+        #card_deck._id = str(uuid4())
+        #self.mp[card_deck._id] = card_deck
+
+        #directory = 'assets/66/cards/'
+        #files = os.listdir(directory)
+        #all_cards = [file for file in files if os.path.isfile(os.path.join(directory, file))]
+
+        #print(all_cards)
+        #hero = "tomoe-gozen"
+        #deck = [f for f in os.listdir(f"assets/{hero}/deck/")]
+        #for c in all_cards:
+        #        front_path = f"assets/66/cards/{c}"
+        #        back_path = f"assets/66/back.webp"
+        #        card = Card(back_path, front_path, 210/1.39, 329/1.39, 230 / 1.4, 329 / 1.4, self.camera_group)
+        #        card._id = str(uuid4())
+        #        self.mp[card._id] = card
+        #        self.add_card_to_card_deck(card_deck, card)
+
+        #self.save_game_state()
+        self.load_game_state()
 
         self.player_hand = PlayerHand(self.camera_group)
         self.player_hand._id = hash_string("player_hand")
         self.camera_group.add_player_hand(self.player_hand)
-
-        v = 2
-        with open('assets/all_cards.txt', 'r') as file:
-            all_cards_front = [f.strip() for f in file.readlines()]
-        with open('assets/all_back.txt', 'r') as file:
-            all_cards_back = [f.strip() for f in file.readlines()]
-        # hero = "tomoe-gozen"
-        # deck = [f for f in os.listdir(f"assets/{hero}/deck/")]
-        for i in range(v):
-            for j in range(v):
-                front_path = f"assets/{all_cards_front[(15 + j + i * v) % len(all_cards_front)]}"
-                back_path = f"assets/{all_cards_back[(j + i * v) % len(all_cards_back)]}"
-                card = Card(back_path, front_path, 230*i/1.39, 329*j/1.39, 230 / 1.4, 329 / 1.4, self.camera_group)
-                card._id = hash_string(f"{front_path}{j + i * v}")
-                self.mp[card._id] = card
-                # index = j + i * v
-                # back_path = f"assets/{hero}/back.webp"
-                # front_path = f"assets/{hero}/deck/{deck[index % len(deck)]}"
         self.assign_z_index(self.player_hand)
 
     def run(self):
@@ -361,7 +363,6 @@ class Game:
             self.clock.tick(self.FPS)
 
     def connect_to_server(self):
-        from uuid import uuid4
         message = {
             "action": "join",
             "name": str(uuid4())
@@ -595,6 +596,55 @@ class Game:
             card_deck = self.mp[message["card_deck_id"]]
             focused = message["focused"]
             self.set_card_deck_focus(card_deck, focused, False)
+
+    def save_game_state(self):
+        game_state = []
+        for sprite in self.camera_group.sprites():
+            if sprite._type == "card":
+                game_state.append({
+                    "type": "card",
+                    "id": sprite._id,
+                    "x": sprite.original_rect.x,
+                    "y": sprite.original_rect.y,
+                    "width": sprite.original_rect.width,
+                    "height": sprite.original_rect.height,
+                    "back_path": sprite.back_image_path,
+                    "front_path": sprite.front_image_path,
+                    "z_index": sprite.z_index,
+                    "render": sprite.render,
+                })
+        for sprite in self.camera_group.sprites():
+            if sprite._type == "card_deck":
+                game_state.append({
+                    "type": "card_deck",
+                    "id": sprite._id,
+                    "x": sprite.original_rect.x,
+                    "y": sprite.original_rect.y,
+                    "width": sprite.original_rect.width,
+                    "height": sprite.original_rect.height,
+                    "z_index": sprite.z_index,
+                    "deck": [f._id for f in sprite.deck]
+                })
+        with open('game_state.json', 'w') as file:
+            json.dump(game_state, file, indent=4)
+
+    def load_game_state(self):
+        with open('game_state.json', 'r') as file:
+            game_state = json.load(file)
+        for sprite in game_state:
+            if sprite["type"] == "card":
+                card = Card(sprite["back_path"], sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.camera_group)
+                card.z_index = sprite["z_index"]
+                card.render = sprite["render"]
+                card._id = sprite["id"]
+                self.mp[card._id] = card
+        for sprite in game_state:
+            if sprite["type"] == "card_deck":
+                card_deck = CardDeck(sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.camera_group)
+                card_deck.z_index = sprite["z_index"]
+                card_deck.deck = [self.mp[card_id] for card_id in sprite["deck"]]
+                card_deck._id = sprite["id"]
+                self.mp[card_deck._id] = card_deck
 
 
 def get_from_server():
