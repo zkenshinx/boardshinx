@@ -1,15 +1,17 @@
-from uuid import uuid4
 import json
-import hashlib
-
-def hash_string(s):
-    return hashlib.sha256(s.encode()).hexdigest()
 import socket
 import os
 import pygame, sys
 from random import randint
 from functools import lru_cache
 import random
+
+hah_id = 0
+def uuid4():
+    global hah_id
+    ret_val = str(hah_id)
+    hah_id += 1
+    return ret_val
 
 class Zoomable:
     def update_zoom(self):
@@ -153,6 +155,17 @@ class CardDeck(pygame.sprite.Sprite, Zoomable):
         if len(self.deck) == 0:
             return
         self.deck[-1].flip()
+        self.create_deck_display()
+
+    # TODO: I don't like how is this done
+    def shuffle(self, shuffled=[]):
+        if len(shuffled) == 0:
+            self.deck = random.sample(self.deck, len(self.deck))
+        else:
+            self.deck = shuffled
+        for card in self.deck:
+            if card.is_front:
+                card.flip()
         self.create_deck_display()
 
     def mark_focused(self, is_focused):
@@ -332,7 +345,6 @@ class Game:
         #files = os.listdir(directory)
         #all_cards = [file for file in files if os.path.isfile(os.path.join(directory, file))]
 
-        #print(all_cards)
         #hero = "tomoe-gozen"
         #deck = [f for f in os.listdir(f"assets/{hero}/deck/")]
         #for c in all_cards:
@@ -347,7 +359,7 @@ class Game:
         self.load_game_state()
 
         self.player_hand = PlayerHand(self.camera_group)
-        self.player_hand._id = hash_string("player_hand")
+        self.player_hand._id = "player_hand"
         self.camera_group.add_player_hand(self.player_hand)
         self.assign_z_index(self.player_hand)
 
@@ -396,6 +408,11 @@ class Game:
     def key_down(self, event):
         if event.key == pygame.K_ESCAPE:
             self.running = False
+        if event.key == pygame.K_r:
+            for obj in self.camera_group.sprites():
+                if obj._type == "card_deck":
+                    self.shuffle_card_deck(obj)
+
 
     def mouse_motion(self, event):
         self.camera_group.mouse_pos = event.pos
@@ -567,6 +584,16 @@ class Game:
             }
             send_to_server(message)
 
+    def shuffle_card_deck(self, card_deck, send_message=True):
+        card_deck.shuffle()
+        if send_message:
+            message = {
+                "action": "shuffle_card_deck",
+                "card_deck_id": card_deck._id,
+                "deck": [f._id for f in card_deck.deck]
+            }
+            send_to_server(message)
+
     def process_networking(self):
         for i in range(15):
             message = get_from_server()
@@ -596,6 +623,9 @@ class Game:
             card_deck = self.mp[message["card_deck_id"]]
             focused = message["focused"]
             self.set_card_deck_focus(card_deck, focused, False)
+        elif message["action"] == "shuffle_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            card_deck.shuffle([self.mp[card_id] for card_id in message["deck"]])
 
     def save_game_state(self):
         game_state = []
