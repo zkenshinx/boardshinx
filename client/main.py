@@ -1,3 +1,9 @@
+import json
+import hashlib
+
+def hash_string(s):
+    return hashlib.sha256(s.encode()).hexdigest()
+import socket
 import os
 import pygame, sys
 from random import randint
@@ -21,7 +27,7 @@ class Card(pygame.sprite.Sprite, Zoomable):
 
         self.original_width = width
         self.original_height = height
-        self.is_front = random.choice([False] * 2 + [True])
+        self.is_front = False
         self.z_index = 0
         self.render = True
         self._type = "card"
@@ -246,9 +252,12 @@ class Game:
         self.zoom_index = 2
         self.zooms = [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
 
+        self.mp = {}
         card_deck = CardDeck(250, 250, 230 / 1.3, 330 / 1.3, self.camera_group)
+        card_deck._id = hash_string("card_deck")
+        self.mp[card_deck._id] = card_deck
 
-        v = 44
+        v = 2
         with open('assets/all_cards.txt', 'r') as file:
             all_cards_front = [f.strip() for f in file.readlines()]
         with open('assets/all_back.txt', 'r') as file:
@@ -257,21 +266,33 @@ class Game:
         # deck = [f for f in os.listdir(f"assets/{hero}/deck/")]
         for i in range(v):
             for j in range(v):
-                back_path = f"assets/{random.choice(all_cards_back)}"
-                front_path = f"assets/{random.choice(all_cards_front)}"
+                front_path = f"assets/{all_cards_front[(15 + j + i * v) % len(all_cards_front)]}"
+                back_path = f"assets/{all_cards_back[(j + i * v) % len(all_cards_back)]}"
                 card = Card(back_path, front_path, 230*i/1.39, 329*j/1.39, 230 / 1.4, 329 / 1.4, self.camera_group)
+                card._id = hash_string(f"{front_path}{j + i * v}")
+                self.mp[card._id] = card
                 # index = j + i * v
                 # back_path = f"assets/{hero}/back.webp"
                 # front_path = f"assets/{hero}/deck/{deck[index % len(deck)]}"
 
     def run(self):
         """Main game loop."""
+        self.connect_to_server()
         while self.running:
             self.handle_events()
             self.camera_group.update()
             self.camera_group.custom_draw()
+            self.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
+
+    def connect_to_server(self):
+        from uuid import uuid4
+        message = {
+            "action": "join",
+            "name": str(uuid4())
+        }
+        send_to_server(message)
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -306,10 +327,9 @@ class Game:
         elif self.is_holding_object and self.held_object is not None:
             if self.held_object._type == 'card_deck':
                 card_deck = self.held_object
-                self.held_object = card_deck.pop_card()
+                self.held_object = self.remove_card_from_card_deck(card_deck)
                 if self.held_object is not None:
                     self.camera_group.move_sprite_to(self.held_object, card_deck.original_rect.x, card_deck.rect.y)
-                    self.assign_z_index(self.held_object)
                     self.move_held_object(event)
             else:
                 self.move_held_object(event)
@@ -318,9 +338,9 @@ class Game:
             mouse_pos = event.pos
             for card_deck in self.get_card_decks():
                 if self.camera_group.collidepoint(card_deck.original_rect, mouse_pos):
-                    card_deck.mark_focused(True)
+                    self.set_card_deck_focus(card_deck, True)
                 else:
-                    card_deck.mark_focused(False)
+                    self.set_card_deck_focus(card_deck, False)
 
     def mouse_button_down(self, event):
         if event.button == 1 and pygame.key.get_mods() & pygame.KMOD_ALT:
@@ -331,7 +351,6 @@ class Game:
             for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
                 # Check if card deck was clicked
                 if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
-                    print(obj.original_rect, mouse_pos)
                     if obj._type == 'card_deck':
                         self.held_object = obj
                         break
@@ -344,16 +363,7 @@ class Game:
         if event.button == 1:
             if self.is_holding_object:
                 if not self.moved_holding_object:
-                    mouse_pos = event.pos
-                    # Check if the card was clicked
-                    for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
-                        if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
-                            if obj._type == "card_deck":
-                                obj.flip_top()
-                            elif obj._type == "card":
-                                self.assign_z_index(obj)
-                                obj.flip()
-                                break
+                    self.check_click_on_object(event)
                 else:
                     if self.held_object._type == "card":
                         # Check collission with all card decks
@@ -361,10 +371,8 @@ class Game:
                         card_decks = [item for item in self.camera_group.sprites() if item._type == "card_deck"]
                         for card_deck in card_decks:
                             if pygame.sprite.collide_rect(self.held_object, card_deck):
-                                card_deck.mark_focused(False)
-                                card_deck.add_card(self.held_object)
-                                # self.camera_group.remove(self.held_object)
-
+                                self.add_card_to_card_deck(card_deck, self.held_object)
+                                break
                 self.is_holding_object = False
                 self.held_object = None
                 self.moved_holding_object = False
@@ -379,13 +387,34 @@ class Game:
             # Check collission with all card decks
             for card_deck in self.get_card_decks():
                 if pygame.sprite.collide_rect(self.held_object, card_deck):
-                    card_deck.mark_focused(True)
+                    self.set_card_deck_focus(card_deck, True)
                 else:
-                    card_deck.mark_focused(False)
+                    self.set_card_deck_focus(card_deck, False)
+        # also broadcast
+        message = {
+            "action": "move_object",
+            "object_id": self.held_object._id,
+            "x": self.held_object.original_rect.x,
+            "y": self.held_object.original_rect.y
+        }
+        send_to_server(message)
+
+    def check_click_on_object(self, event):
+        mouse_pos = event.pos
+        # Check if something was clicked
+        for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
+            if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
+                if obj._type == "card_deck":
+                    self.card_deck_clicked(obj)
+                    break
+                elif obj._type == "card":
+                    self.card_clicked(obj)
+                    break
 
     def assign_z_index(self, obj):
         obj.z_index = self.z_index_iota
         self.z_index_iota += 1
+        print(self.z_index_iota)
 
     def handle_zoom(self, event):
         next_zoom_index = self.zoom_index + event.y
@@ -400,6 +429,116 @@ class Game:
     def quit(self):
         """Quit the game and clean up resources."""
         pygame.quit()
+
+    # Action functions below
+    def card_clicked(self, card, send_message=True):
+        self.assign_z_index(card)
+        card.flip()
+        if send_message:
+            message = {
+                "action": "flip_card",
+                "card_id": card._id
+            }
+            send_to_server(message)
+
+    def card_deck_clicked(self, card_deck, send_message=True):
+        card_deck.flip_top()
+        if send_message:
+            message = {
+                "action": "flip_card_deck",
+                "card_deck_id": card_deck._id
+            }
+            send_to_server(message)
+
+    def add_card_to_card_deck(self, card_deck, card, send_message=True):
+        card_deck.mark_focused(False)
+        card_deck.add_card(card)
+        if send_message:
+            message = {
+                "action": "add_card_to_card_deck",
+                "card_id": card._id,
+                "card_deck_id": card_deck._id
+            }
+            send_to_server(message)
+
+    def remove_card_from_card_deck(self, card_deck, send_message=True):
+        top_card = card_deck.pop_card()
+        if send_message:
+            message = {
+                "action": "remove_card_from_card_deck",
+                "card_deck_id": card_deck._id
+            }
+            send_to_server(message)
+        self.assign_z_index(top_card)
+        return top_card
+
+    def set_card_deck_focus(self, card_deck, focused, send_message=True):
+        if focused:
+            card_deck.mark_focused(True)
+        else:
+            card_deck.mark_focused(False)
+        if send_message:
+            message = {
+                "action": "set_card_deck_focus",
+                "card_deck_id": card_deck._id,
+                "focused": focused
+            }
+            send_to_server(message)
+
+    def process_networking(self):
+        for i in range(15):
+            message = get_from_server()
+            if message is not None:
+                self.process_message_from_server(message)
+    
+    def process_message_from_server(self, message):
+        if message["action"] == 'move_object':
+            x = message["x"]
+            y = message["y"]
+            self.camera_group.move_sprite_to(self.mp[message["object_id"]], x, y)
+        elif message["action"] == "flip_card":
+            card = self.mp[message["card_id"]]
+            self.card_clicked(card, False)
+        elif message["action"] == "flip_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            self.card_deck_clicked(card_deck, False)
+        elif message["action"] == "add_card_to_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            card = self.mp[message["card_id"]]
+            self.add_card_to_card_deck(card_deck, card, False)
+        elif message["action"] == "remove_card_from_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            top_card = self.remove_card_from_card_deck(card_deck, False)
+        elif message["action"] == "set_card_deck_focus":
+            # TODO: this can be optimized?
+            card_deck = self.mp[message["card_deck_id"]]
+            focused = message["focused"]
+            self.set_card_deck_focus(card_deck, focused, False)
+
+
+def get_from_server():
+    try:
+        data, _ = sock.recvfrom(BUFFER_SIZE)
+        message = json.loads(data.decode('utf-8'))
+        return message
+    except BlockingIOError:
+        return None
+
+def send_to_server(data):
+    message = json.dumps(data).encode('utf-8')
+    sock.sendto(message, (SERVER_IP, SERVER_PORT))
+
+def init_networking():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+    return sock
+
+SERVER_IP = '16.171.34.99'
+SERVER_PORT = 23456
+SERVER_IP = 'localhost'
+SERVER_PORT = 23456
+BUFFER_SIZE = 1024
+sock = init_networking()
 
 g = Game()
 g.run()
