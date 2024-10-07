@@ -329,10 +329,12 @@ class CameraGroup(pygame.sprite.Group):
         sprite.rect.move_ip(rel2)
 
     def move_sprite_to(self, sprite, x, y):
-        sprite.original_rect.x = x
-        sprite.original_rect.y = y
-        sprite.rect.x = x
-        sprite.rect.y = y
+        sprite.original_rect.topleft = (x, y)
+        sprite.rect.topleft = (x, y)
+
+    def move_sprite_to_centered_zoomed(self, sprite, x, y):
+        sprite.rect.center = (x / self.zoom_scale - self.rel_x, y / self.zoom_scale - self.rel_y)
+        sprite.original_rect.center = sprite.rect.center
 
     def update_sprite_pos(self, sprite):
         scale_factor = self.zoom_scale
@@ -374,8 +376,8 @@ class Game:
         self.moved_holding_object = False
         self.held_object = None
         self.z_index_iota = 0
-        self.zoom_index = 2
-        self.zooms = [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
+        self.zoom_index = 3
+        self.zooms = [0.5, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
 
         self.mp = {}
 
@@ -494,12 +496,11 @@ class Game:
         self.moved_holding_object = False
 
     def move_held_object(self, event):
-        if self.held_object.draggable:
-            print("hi", self.held_object)
-            self.moved_holding_object = True
-            self.camera_group.move_sprite_rel(self.held_object, event.rel)
-            self.assign_inf_z_index(self.held_object)
         self.held_object = self.held_object.holding()
+        if self.held_object.draggable:
+            self.moved_holding_object = True
+            self.camera_group.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
+            self.assign_inf_z_index(self.held_object)
 
         message = {
             "action": "move_object",
