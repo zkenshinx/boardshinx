@@ -94,17 +94,17 @@ class Card(pygame.sprite.Sprite, BoardObject):
         if self in self.game.player_hand.deck:
             self.game.player_hand.remove_card(self)
         for card_deck in self.game.get_card_decks():
-            if pygame.sprite.collide_rect(self, card_deck):
+            if self.group.colliderect(self.rect, card_deck.rect):
                 card_deck.mark_focused(True)
             else:
                 card_deck.mark_focused(False)
-        self.game.check_collide_with_hand(self)
+        self.game.player_hand.check_collide_with_hand(self)
         return self
 
     def release(self):
         def try_add_card_to_deck(self):
             for card_deck in self.game.get_card_decks():
-                if pygame.sprite.collide_rect(self, card_deck):
+                if self.group.colliderect(self.rect, card_deck.rect):
                     self.game.add_card_to_card_deck(card_deck, self)
                     return True
             return False
@@ -112,7 +112,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
         if try_add_card_to_deck(self):
             return
         
-        if self.game.check_collide_with_hand(self):
+        if self.game.player_hand.check_collide_with_hand(self):
             self.game.add_card_to_hand(self)
 
     def flip(self):
@@ -138,7 +138,6 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
 
 
     def create_deck_display(self):
-        # TODO: change to width and height
         border_thickness = int((self.rect.height + 99) / 100)
         border_radius = int((self.rect.width + 19) / 20)
         surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
@@ -160,7 +159,6 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
             gray_overlay.fill((128, 128, 128, 80))
             surface.blit(gray_overlay, (0, 0))
-        
         self.display = surface
 
     def add_card(self, card):
@@ -216,6 +214,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
 
 class PlayerHand(pygame.sprite.Sprite, BoardObject):
     def __init__(self, group, game):
+        super().__init__(group)
         self.game = game
         self.group = group
         self._type = "player_hand"
@@ -234,7 +233,6 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.rect = pygame.rect.Rect(x, y, width, height)
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         
-        # TODO: change to width and height
         border_thickness = int((self.rect.height + 99) / 100)
         border_radius = int((self.rect.width + 79) / 80)
         surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
@@ -250,8 +248,8 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         margin = 10
         for i in range(len(self.deck)):
             card = self.deck[i]
-            start_x = (x - self.group.zoom_scale * self.group.rel_x) / self.group.zoom_scale
-            start_y = (y - self.group.zoom_scale * self.group.rel_y) / self.group.zoom_scale
+            start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
+            start_y = (y - self.group.zoom_scale * self.group.offset_y) / self.group.zoom_scale
             card.rect.x = start_x + (i + 1) * margin + i * card.rect.width / self.group.zoom_scale
             card.rect.y = start_y + 7
             card.original_rect.x = card.rect.x
@@ -280,7 +278,21 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             self.create_hand_display()
 
     def mark_focused(self, is_focused):
-        self.is_focused = is_focused
+        if self.is_focused != is_focused:
+            self.is_focused = is_focused
+            self.create_hand_display()
+
+    def check_collide_with_hand(self, card):
+        card_rect = card.rect.copy()
+        card_rect.topleft = self.group.apply_zoom(*card_rect.topleft)
+        if card_rect.colliderect(self.rect):
+            self.mark_focused(True)
+            return True
+        else:
+            self.mark_focused(False)
+            return False
+
+    def update_zoom(self):
         self.create_hand_display()
 
 class CameraGroup(pygame.sprite.Group):
@@ -288,31 +300,34 @@ class CameraGroup(pygame.sprite.Group):
         super().__init__()
         self.display_surface = pygame.display.get_surface()
         self.zoom_scale = 1
-        self.rel_x = 0
-        self.rel_y = 0
+        self.offset_x = 0
+        self.offset_y = 0
 
     def custom_draw(self):
         self.display_surface.fill('#71ddee')
 
         screen_rect = self.display_surface.get_rect()
-        screen_rect.x = (screen_rect.x - self.rel_x)
-        screen_rect.y = (screen_rect.y - self.rel_y)
+        screen_rect.x = (screen_rect.x - self.offset_x)
+        screen_rect.y = (screen_rect.y - self.offset_y)
         screen_rect.width  /= self.zoom_scale
         screen_rect.height /= self.zoom_scale
-        for sprite in sorted([s for s in self.sprites() if s.render] + [self.player_hand], key= lambda x : x.z_index):
+        s = 0
+        for sprite in sorted([s for s in self.sprites() if s.render], key= lambda x : x.z_index):
             if sprite._type == "player_hand":
-                self.display_surface.blit(self.player_hand.display, self.player_hand.rect.topleft)
+                self.display_surface.blit(sprite.display, sprite.rect.topleft)
                 continue
-            if screen_rect.colliderect(sprite.original_rect):
-                topleft = sprite.rect.topleft
-                offset_pos = ((topleft[0] + self.rel_x) * self.zoom_scale, (topleft[1] + self.rel_y) * self.zoom_scale)
-                self.display_surface.blit(sprite.display,offset_pos)
+            if self.colliderect(screen_rect, sprite.rect):
+                offset_pos = self.apply_zoom(*sprite.rect.topleft)
+                self.display_surface.blit(sprite.display, offset_pos)
+                s += 1
+        print(s)
 
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
         order_priority = {
             "card": 1,
-            "card_deck": 2
+            "card_deck": 2,
+            "player_hand": 3
         }
         for sprite in sorted(self.sprites(), key=lambda x : order_priority[x._type]):
             self.update_sprite_pos(sprite)
@@ -320,8 +335,8 @@ class CameraGroup(pygame.sprite.Group):
 
     def move_camera(self, rel):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
-        self.rel_x += rel2[0]
-        self.rel_y += rel2[1]
+        self.offset_x += rel2[0]
+        self.offset_y += rel2[1]
 
     def move_sprite_rel(self, sprite, rel):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
@@ -333,27 +348,38 @@ class CameraGroup(pygame.sprite.Group):
         sprite.rect.topleft = (x, y)
 
     def move_sprite_to_centered_zoomed(self, sprite, x, y):
-        sprite.rect.center = (x / self.zoom_scale - self.rel_x, y / self.zoom_scale - self.rel_y)
+        sprite.rect.center = self.reverse_zoom(x, y)
         sprite.original_rect.center = sprite.rect.center
 
     def update_sprite_pos(self, sprite):
         scale_factor = self.zoom_scale
-        center_x = self.display_surface.get_size()[0] // 2 - self.rel_x
-        center_y = self.display_surface.get_size()[1] // 2 - self.rel_y
+        center_x = self.display_surface.get_size()[0] // 2 - self.offset_x
+        center_y = self.display_surface.get_size()[1] // 2 - self.offset_y
         sprite.rect.width = sprite.original_rect.width * scale_factor
         sprite.rect.height = sprite.original_rect.height * scale_factor
-        pos_x = center_x + (sprite.original_rect.x - center_x) * scale_factor + self.rel_x
-        pos_y = center_y + (sprite.original_rect.y - center_y) * scale_factor + self.rel_y
+        pos_x = center_x + (sprite.original_rect.x - center_x) * scale_factor + self.offset_x
+        pos_y = center_y + (sprite.original_rect.y - center_y) * scale_factor + self.offset_y
+
+    def colliderect(self, rect1, rect2):
+        def normalize(rect):
+            rect_copy = rect.copy()
+            rect_copy.width /= self.zoom_scale
+            rect_copy.height /= self.zoom_scale
+            return rect_copy
+        return normalize(rect1).colliderect(normalize(rect2))
 
     def collidepoint(self, rect, mouse_pos):
-        scaled_mouse_pos = (
-            (mouse_pos[0] / self.zoom_scale) - self.rel_x,
-            (mouse_pos[1] / self.zoom_scale) - self.rel_y
-        )
-        return rect.collidepoint(scaled_mouse_pos)
+        return rect.collidepoint(self.reverse_zoom(*mouse_pos))
 
-    def add_player_hand(self, player_hand):
-        self.player_hand = player_hand
+    def apply_zoom(self, x, y):
+        zoomed_x = (x + self.offset_x) * self.zoom_scale
+        zoomed_y = (y + self.offset_y) * self.zoom_scale
+        return zoomed_x, zoomed_y
+
+    def reverse_zoom(self, x, y):
+        reversed_x = (x / self.zoom_scale) - self.offset_x
+        reversed_y = (y / self.zoom_scale) - self.offset_y
+        return reversed_x, reversed_y
 
 class Game:
     WINDOW_WIDTH = 1280
@@ -385,7 +411,6 @@ class Game:
 
         self.player_hand = PlayerHand(self.camera_group, self)
         self.player_hand._id = "player_hand"
-        self.camera_group.add_player_hand(self.player_hand)
         self.assign_z_index(self.player_hand)
 
     def run(self):
@@ -437,6 +462,9 @@ class Game:
                     self.shuffle_card_deck(obj)
 
     def mouse_motion(self, event):
+        if random.randint(1, 10) == 10:
+            # transformed = self.camera_group.apply_zoom(*event.pos)
+            transformed = self.camera_group.reverse_zoom(*event.pos)
         if self.moving_around_board and pygame.mouse.get_pressed()[1]:
             self.process_moving_around_board(event)
         elif self.is_holding_object and self.held_object is not None:
@@ -510,17 +538,6 @@ class Game:
         }
         send_to_server(message)
 
-    def check_collide_with_hand(self, card):
-        card_rect = self.held_object.rect.copy()
-        card_rect.x = (card_rect.x + self.camera_group.rel_x) * self.camera_group.zoom_scale
-        card_rect.y = (card_rect.y + self.camera_group.rel_y) * self.camera_group.zoom_scale
-        if card_rect.colliderect(self.player_hand.rect):
-            self.player_hand.mark_focused(True)
-            return True
-        else:
-            self.player_hand.mark_focused(False)
-            return False
-
     def process_release(self):
         self.held_object.release()
 
@@ -569,11 +586,8 @@ class Game:
         if 0 <= next_zoom_index < len(self.zooms):
             self.zoom_index = next_zoom_index
             self.camera_group.zoom(self.zooms[self.zoom_index])
-            # Player hand
-            self.player_hand.create_hand_display()
 
     def get_card_decks(self):
-        # TODO: optimize this
         return [item for item in self.camera_group.sprites() if item._type == "card_deck"]
 
     def get_rendered_objects(self):
