@@ -110,7 +110,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
         def try_add_card_to_deck(self):
             for card_deck in self.game.get_card_decks():
                 if self.group.colliderect(self.rect, card_deck.rect):
-                    self.game.add_card_to_card_deck(card_deck, self)
+                    card_deck.add_card(self)
                     return True
             return False
 
@@ -118,7 +118,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
             return
         
         if self.game.player_hand.check_collide_with_hand(self):
-            self.game.add_card_to_hand(self)
+            self.game.player_hand.add_card(self)
 
     def flip(self):
         self.is_front = not self.is_front
@@ -168,9 +168,11 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
         self.display = surface
 
     def add_card(self, card):
-        card.render = False
-        self.deck.append(card)
-        self.create_deck_display()
+        if card not in self.deck:
+            self.mark_focused(False)
+            card.render = False
+            self.deck.append(card)
+            self.create_deck_display()
 
     def pop_card(self):
         if len(self.deck) == 0:
@@ -277,6 +279,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
 
     def add_card(self, card):
         if card not in self.deck:
+            self.mark_focused(False)
             if not card.is_front:
                 card.flip()
             self.deck.append(card)
@@ -391,6 +394,7 @@ class Game:
     CLICKED_OBJECT_SCALE = 1.1
 
     def __init__(self):
+        self.network_mg = NetworkManager()
         pygame.init()
         self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.RESIZABLE)
         pygame.display.set_caption("Boardshinx")
@@ -418,21 +422,13 @@ class Game:
 
     def run(self):
         """Main game loop."""
-        self.connect_to_server()
         while self.running:
             self.handle_events()
             self.camera_group.update()
             self.camera_group.custom_draw()
-            self.process_networking()
+            self.network_mg.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
-
-    def connect_to_server(self):
-        message = {
-            "action": "join",
-            "name": str(uuid4())
-        }
-        send_to_server(message)
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -527,13 +523,13 @@ class Game:
             self.camera_group.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
             self.assign_inf_z_index(self.held_object)
 
-        message = {
-            "action": "move_object",
-            "object_id": self.held_object._id,
-            "x": self.held_object.original_rect.x,
-            "y": self.held_object.original_rect.y
-        }
-        send_to_server(message)
+            #message = {
+            #    "action": "move_object",
+            #    "object_id": self.held_object._id,
+            #    "x": self.held_object.original_rect.x,
+            #    "y": self.held_object.original_rect.y
+            #}
+            #self.send_to_server(message)
 
     def process_release(self):
         self.held_object.release()
@@ -590,138 +586,6 @@ class Game:
     def get_rendered_objects(self):
         return [s for s in self.camera_group.sprites() if s.render]
 
-    def quit(self):
-        """Quit the game and clean up resources."""
-        pygame.quit()
-
-    # Action functions below
-    def card_clicked(self, card, send_message=True):
-        self.assign_z_index(card)
-        card.flip()
-        if send_message:
-            message = {
-                "action": "flip_card",
-                "card_id": card._id
-            }
-            send_to_server(message)
-
-    def card_deck_clicked(self, card_deck, send_message=True):
-        card_deck.flip_top()
-        if send_message:
-            message = {
-                "action": "flip_card_deck",
-                "card_deck_id": card_deck._id
-            }
-            send_to_server(message)
-
-    def add_card_to_card_deck(self, card_deck, card, send_message=True):
-        card_deck.mark_focused(False)
-        card_deck.add_card(card)
-        if send_message:
-            message = {
-                "action": "add_card_to_card_deck",
-                "card_id": card._id,
-                "card_deck_id": card_deck._id
-            }
-            send_to_server(message)
-
-    def add_card_to_hand(self, card, send_message=True):
-        self.player_hand.mark_focused(False)
-        self.player_hand.add_card(card)
-        if send_message:
-            message = {
-                "action": "add_card_to_hand",
-                "object_id": card._id
-            }
-            send_to_server(message)
-
-    def remove_card_from_hand(self, card, send_message=True):
-        self.player_hand.mark_focused(False)
-        self.player_hand.remove_card(card)
-        card.render = True
-        if send_message:
-            message = {
-                "action": "remove_card_from_hand",
-                "object_id": card._id
-            }
-            send_to_server(message)
-
-    def remove_card_from_card_deck(self, card_deck, send_message=True):
-        top_card = card_deck.pop_card()
-        if send_message:
-            message = {
-                "action": "remove_card_from_card_deck",
-                "card_deck_id": card_deck._id
-            }
-            send_to_server(message)
-        if top_card is not None:
-            self.assign_z_index(top_card)
-        return top_card
-
-    def set_card_deck_focus(self, card_deck, focused, send_message=True):
-        if focused:
-            card_deck.mark_focused(True)
-        else:
-            card_deck.mark_focused(False)
-        if send_message:
-            message = {
-                "action": "set_card_deck_focus",
-                "card_deck_id": card_deck._id,
-                "focused": focused
-            }
-            send_to_server(message)
-
-    def shuffle_card_deck(self, card_deck, send_message=True):
-        card_deck.shuffle()
-        if send_message:
-            message = {
-                "action": "shuffle_card_deck",
-                "card_deck_id": card_deck._id,
-                "deck": [f._id for f in card_deck.deck]
-            }
-            send_to_server(message)
-
-    def process_networking(self):
-        for i in range(15):
-            message = get_from_server()
-            if message is not None:
-                self.process_message_from_server(message)
-    
-    def process_message_from_server(self, message):
-        if message["action"] == 'move_object':
-            x = message["x"]
-            y = message["y"]
-            self.camera_group.move_sprite_to(self.mp[message["object_id"]], x, y)
-        elif message["action"] == "flip_card":
-            card = self.mp[message["card_id"]]
-            self.card_clicked(card, False)
-        elif message["action"] == "flip_card_deck":
-            card_deck = self.mp[message["card_deck_id"]]
-            self.card_deck_clicked(card_deck, False)
-        elif message["action"] == "add_card_to_card_deck":
-            card_deck = self.mp[message["card_deck_id"]]
-            card = self.mp[message["card_id"]]
-            self.add_card_to_card_deck(card_deck, card, False)
-        elif message["action"] == "remove_card_from_card_deck":
-            card_deck = self.mp[message["card_deck_id"]]
-            top_card = self.remove_card_from_card_deck(card_deck, False)
-        elif message["action"] == "set_card_deck_focus":
-            # TODO: this can be optimized?
-            card_deck = self.mp[message["card_deck_id"]]
-            focused = message["focused"]
-            self.set_card_deck_focus(card_deck, focused, False)
-        elif message["action"] == "shuffle_card_deck":
-            card_deck = self.mp[message["card_deck_id"]]
-            card_deck.shuffle([self.mp[card_id] for card_id in message["deck"]])
-        elif message["action"] == "add_card_to_hand":
-            obj = self.mp[message["object_id"]]
-            obj.assign_front(True)
-            obj.render = False
-        elif message["action"] == "remove_card_from_hand":
-            obj = self.mp[message["object_id"]]
-            obj.assign_front(False)
-            obj.render = True
-
     def save_game_state(self):
         game_state = []
         for sprite in self.camera_group.sprites():
@@ -773,27 +637,136 @@ class Game:
                 self.mp[card_deck._id] = card_deck
 
 
-def get_from_server():
-    try:
-        data, _ = sock.recvfrom(BUFFER_SIZE)
-        message = json.loads(data.decode('utf-8'))
-        return message
-    except BlockingIOError:
-        return None
+    def quit(self):
+        """Quit the game and clean up resources."""
+        pygame.quit()
 
-def send_to_server(data):
-    message = json.dumps(data).encode('utf-8')
-    sock.sendto(message, (SERVER_IP, SERVER_PORT))
 
-def init_networking():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setblocking(False)
-    return sock
+class NetworkManager:
 
-SERVER_IP = 'localhost'
-SERVER_PORT = 23456
-BUFFER_SIZE = 1024
-sock = init_networking()
+    def card_clicked(self, card, send_message=True):
+        if send_message:
+            message = {
+                "action": "flip_card",
+                "card_id": card._id
+            }
+            self.send_to_server(message)
+
+    def card_deck_clicked(self, card_deck, send_message=True):
+        if send_message:
+            message = {
+                "action": "flip_card_deck",
+                "card_deck_id": card_deck._id
+            }
+            self.send_to_server(message)
+
+    def add_card_to_card_deck(self, card_deck, card, send_message=True):
+        if send_message:
+            message = {
+                "action": "add_card_to_card_deck",
+                "card_id": card._id,
+                "card_deck_id": card_deck._id
+            }
+            self.send_to_server(message)
+
+    def add_card_to_hand(self, card, send_message=True):
+        if send_message:
+            message = {
+                "action": "add_card_to_hand",
+                "object_id": card._id
+            }
+            self.send_to_server(message)
+
+    def remove_card_from_hand(self, card, send_message=True):
+        if send_message:
+            message = {
+                "action": "remove_card_from_hand",
+                "object_id": card._id
+            }
+            self.send_to_server(message)
+
+    def remove_card_from_card_deck(self, card_deck, send_message=True):
+        if send_message:
+            message = {
+                "action": "remove_card_from_card_deck",
+                "card_deck_id": card_deck._id
+            }
+            self.send_to_server(message)
+
+    def shuffle_card_deck(self, card_deck, send_message=True):
+        if send_message:
+            message = {
+                "action": "shuffle_card_deck",
+                "card_deck_id": card_deck._id,
+                "deck": [f._id for f in card_deck.deck]
+            }
+            self.send_to_server(message)
+
+    def process_message_from_server(self, message):
+        if message["action"] == 'move_object':
+            x = message["x"]
+            y = message["y"]
+            self.camera_group.move_sprite_to(self.mp[message["object_id"]], x, y)
+        elif message["action"] == "flip_card":
+            card = self.mp[message["card_id"]]
+            self.card_clicked(card, False)
+        elif message["action"] == "flip_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            self.card_deck_clicked(card_deck, False)
+        elif message["action"] == "add_card_to_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            card = self.mp[message["card_id"]]
+            self.add_card_to_card_deck(card_deck, card, False)
+        elif message["action"] == "remove_card_from_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            top_card = self.remove_card_from_card_deck(card_deck, False)
+        elif message["action"] == "shuffle_card_deck":
+            card_deck = self.mp[message["card_deck_id"]]
+            card_deck.shuffle([self.mp[card_id] for card_id in message["deck"]])
+        elif message["action"] == "add_card_to_hand":
+            obj = self.mp[message["object_id"]]
+            obj.assign_front(True)
+            obj.render = False
+        elif message["action"] == "remove_card_from_hand":
+            obj = self.mp[message["object_id"]]
+            obj.assign_front(False)
+            obj.render = True
+
+    def connect_to_server(self):
+        message = {
+            "action": "join",
+            "name": str(uuid4())
+        }
+        self.send_to_server(message)
+
+    def process_networking(self):
+        for i in range(15):
+            message = self.get_from_server()
+            if message is not None:
+                self.process_message_from_server(message)
+    
+    def get_from_server(self):
+        try:
+            data, _ = self.sock.recvfrom(self.BUFFER_SIZE)
+            message = json.loads(data.decode('utf-8'))
+            return message
+        except BlockingIOError:
+            return None
+
+    def send_to_server(self, data):
+        message = json.dumps(data).encode('utf-8')
+        self.sock.sendto(message, (self.SERVER_IP, self.SERVER_PORT))
+
+    def init_networking(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setblocking(False)
+
+    def __init__(self):
+        self.SERVER_IP = 'localhost'
+        self.SERVER_PORT = 23456
+        self.BUFFER_SIZE = 1024
+        self.init_networking()
+
 
 g = Game()
 g.run()
