@@ -61,23 +61,9 @@ class Card(pygame.sprite.Sprite, BoardObject):
     @lru_cache(maxsize=4096)
     def create_combined_image(image_path, width, height):
         """Create a new image combining the original image and its outline."""
-        border_thickness = 2
-        white_space = int(height * 0.05)
-        border_radius = int((width + 19) / 20)
         image = pygame.image.load(image_path).convert_alpha()
-        scaled_width = width - 2 * border_thickness
-        scaled_height = height - (2 * border_thickness + 2 * white_space)
-        scaled_image = pygame.transform.smoothscale(image, (scaled_width, scaled_height))
-        combined_surface = pygame.Surface((width, height), pygame.SRCALPHA)
-
-        pygame.draw.rect(combined_surface, (255, 255, 255), 
-                         (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
-                         border_radius=border_radius)
-        pygame.draw.rect(combined_surface, (0, 0, 0),
-                         (0, 0, combined_surface.get_width(), combined_surface.get_height()), 
-                         width=border_thickness, border_radius=border_radius)
-        combined_surface.blit(scaled_image, (border_thickness, white_space))
-        return combined_surface
+        scaled_image = pygame.transform.smoothscale(image, (width, height))
+        return scaled_image
 
     def update_zoom(self):
         self.set_image()
@@ -141,15 +127,13 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
 
     def create_deck_display(self):
         border_thickness = int((self.rect.height + 99) / 100)
-        border_radius = int((self.rect.width + 19) / 20)
         surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         
         pygame.draw.rect(surface, (255, 255, 255),
-                         (0, 0, surface.get_width(), surface.get_height()), 
-                         border_radius=border_radius)
+                         (0, 0, surface.get_width(), surface.get_height()))
         pygame.draw.rect(surface, (0, 0, 0),
-                         (0, 0, surface.get_width(), surface.get_height()), 
-                         width=border_thickness, border_radius=border_radius)
+                         (0, 0, surface.get_width(), surface.get_height()),
+                         width=border_thickness)
 
         if len(self.deck) > 0:
             top_card = self.deck[-1]
@@ -254,15 +238,13 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         
         border_thickness = int((self.rect.height + 99) / 100)
-        border_radius = int((self.rect.width + 79) / 80)
         surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         
         pygame.draw.rect(surface, (255, 255, 255),
-                         (0, 0, surface.get_width(), surface.get_height()), 
-                         border_radius=border_radius)
+                         (0, 0, surface.get_width(), surface.get_height()))
         pygame.draw.rect(surface, (0, 0, 0),
-                         (0, 0, surface.get_width(), surface.get_height()), 
-                         width=border_thickness, border_radius=border_radius)
+                         (0, 0, surface.get_width(), surface.get_height()),
+                         width=border_thickness)
 
         self.game.assign_z_index(self)
         margin = 10
@@ -540,6 +522,7 @@ class Game:
 
     def process_release(self):
         self.held_object.release()
+        self.assign_z_index(self.held_object)
 
     def process_click(self, mouse_pos):
         """
@@ -555,6 +538,7 @@ class Game:
         for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
             if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
                 obj.clicked()
+                self.assign_z_index(obj)
                 return True
         return False
 
