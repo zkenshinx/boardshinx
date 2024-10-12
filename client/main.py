@@ -14,6 +14,10 @@ def uuid4():
     return ret_val
 
 class BoardObject:
+    
+    def __init__(self):
+        self.static_rendering = False
+
     def update_zoom(self):
         pass
 
@@ -37,6 +41,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height, group, game):
         super().__init__(group)
+        BoardObject.__init__(self)
         self.game  = game
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         self.rect = pygame.rect.Rect(x, y, width, height)
@@ -123,6 +128,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
     """Represents a card deck in the game."""
     def __init__(self, x, y, width, height, group):
         super().__init__(group)
+        BoardObject.__init__(self)
         self.group = group
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         self.rect = pygame.rect.Rect(x, y, width, height)
@@ -215,6 +221,8 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
 class PlayerHand(pygame.sprite.Sprite, BoardObject):
     def __init__(self, group, game):
         super().__init__(group)
+        BoardObject.__init__(self)
+        self.static_rendering = True
         self.game = game
         self.group = group
         self._type = "player_hand"
@@ -261,26 +269,27 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             gray_overlay.fill((128, 128, 128, 80))
             surface.blit(gray_overlay, (0, 0))
         
-        self.display = surface
+        return surface
+
+    @property
+    def display(self):
+        return self.create_hand_display()
 
     def add_card(self, card):
         if card not in self.deck:
             if not card.is_front:
                 card.flip()
             self.deck.append(card)
-            self.create_hand_display()
 
     def remove_card(self, card):
         if card in self.deck:
             if card.is_front:
                 card.flip()
             self.deck.remove(card)
-            self.create_hand_display()
 
     def mark_focused(self, is_focused):
         if self.is_focused != is_focused:
             self.is_focused = is_focused
-            self.create_hand_display()
 
     def check_collide_with_hand(self, card):
         card_rect = card.rect.copy()
@@ -291,9 +300,6 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         else:
             self.mark_focused(False)
             return False
-
-    def update_zoom(self):
-        self.create_hand_display()
 
 class CameraGroup(pygame.sprite.Group):
     def __init__(self):
@@ -311,16 +317,13 @@ class CameraGroup(pygame.sprite.Group):
         screen_rect.y = (screen_rect.y - self.offset_y)
         screen_rect.width  /= self.zoom_scale
         screen_rect.height /= self.zoom_scale
-        s = 0
         for sprite in sorted([s for s in self.sprites() if s.render], key= lambda x : x.z_index):
-            if sprite._type == "player_hand":
+            if sprite.static_rendering:
                 self.display_surface.blit(sprite.display, sprite.rect.topleft)
                 continue
             if self.colliderect(screen_rect, sprite.rect):
                 offset_pos = self.apply_zoom(*sprite.rect.topleft)
                 self.display_surface.blit(sprite.display, offset_pos)
-                s += 1
-        print(s)
 
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
@@ -437,8 +440,6 @@ class Game:
                 self.running = False
             elif event.type == pygame.VIDEORESIZE:
                 self.WINDOW_WIDTH, self.WINDOW_HEIGHT = event.w, event.h
-                # TODO: remove this
-                self.player_hand.create_hand_display()
             self.handle_input(event)
 
     def handle_input(self, event):
@@ -462,9 +463,6 @@ class Game:
                     self.shuffle_card_deck(obj)
 
     def mouse_motion(self, event):
-        if random.randint(1, 10) == 10:
-            # transformed = self.camera_group.apply_zoom(*event.pos)
-            transformed = self.camera_group.reverse_zoom(*event.pos)
         if self.moving_around_board and pygame.mouse.get_pressed()[1]:
             self.process_moving_around_board(event)
         elif self.is_holding_object and self.held_object is not None:
@@ -474,7 +472,6 @@ class Game:
 
     def process_moving_around_board(self, event):
         self.camera_group.move_camera(event.rel)
-        self.player_hand.create_hand_display()
 
     def process_mouse_hovering(self, mouse_pos):
         for sprite in self.get_rendered_objects():
