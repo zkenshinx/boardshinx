@@ -11,6 +11,7 @@ class BoardObject:
     
     def __init__(self):
         self.static_rendering = False
+        self.is_focused = False
 
     def update_zoom(self):
         pass
@@ -22,10 +23,15 @@ class BoardObject:
         return self
 
     def hovering(self):
-        pass
+        self.mark_focused(True)
 
     def not_hovering(self):
-        pass
+        self.mark_focused(False)
+
+    def mark_focused(self, is_focused):
+        if self.is_focused != is_focused:
+            self.is_focused = is_focused
+            self.create_display()
 
     def release(self):
         pass
@@ -53,13 +59,13 @@ class Card(pygame.sprite.Sprite, BoardObject):
 
     def set_image(self):
         if self.is_front:
-            self.display = Card.create_combined_image(self.front_image_path, self.rect.width, self.rect.height)
+            self.display = Card.create_display(self.front_image_path, self.rect.width, self.rect.height)
         else:
-            self.display = Card.create_combined_image(self.back_image_path, self.rect.width, self.rect.height)
+            self.display = Card.create_display(self.back_image_path, self.rect.width, self.rect.height)
 
     @staticmethod
     @lru_cache(maxsize=4096)
-    def create_combined_image(image_path, width, height):
+    def create_display(image_path, width, height):
         """Create a new image combining the original image and its outline."""
         image = pygame.image.load(image_path).convert_alpha()
         scaled_image = pygame.transform.smoothscale(image, (width, height))
@@ -105,6 +111,9 @@ class Card(pygame.sprite.Sprite, BoardObject):
         self.game.network_mg.flip_card_send(self)
         self.set_image()
 
+    def mark_focused(self, is_focused):
+        pass
+
 class CardDeck(pygame.sprite.Sprite, BoardObject):
     """Represents a card deck in the game."""
     def __init__(self, x, y, width, height, group, game):
@@ -120,12 +129,11 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
         self.deck = []
         self.render = True
         self.last_focused = True
-        self.is_focused = False
         self.counter = 0
-        self.create_deck_display()
+        self.create_display()
 
 
-    def create_deck_display(self):
+    def create_display(self):
         border_thickness = int((self.rect.height + 99) / 100)
         surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         
@@ -143,7 +151,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
 
         if self.is_focused:
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
-            gray_overlay.fill((128, 128, 128, 80))
+            gray_overlay.fill((80, 80, 80, 99))
             surface.blit(gray_overlay, (0, 0))
         self.display = surface
 
@@ -154,7 +162,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
             self.mark_focused(False)
             card.render = False
             self.deck.append(card)
-            self.create_deck_display()
+            self.create_display()
 
     def pop_card(self, card=None, send_message=True):
         if len(self.deck) == 0:
@@ -164,14 +172,14 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
             if send_message:
                 self.game.network_mg.remove_card_from_card_deck_send(self, last)
             self.deck = self.deck[:-1]
-            self.create_deck_display()
+            self.create_display()
             last.render = True
             return last
         else:
             # In case of networking race condition
             if card in self.deck:
                 self.deck.remove(card)
-                self.create_deck_display()
+                self.create_display()
                 card.render = True
                 self.game.assign_z_index(card)
                 return card
@@ -180,12 +188,6 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
     def clicked(self):
         self.flip_top()
 
-    def hovering(self):
-        self.mark_focused(True)
-
-    def not_hovering(self):
-        self.mark_focused(False)
-
     def holding(self):
         return self.pop_card()
 
@@ -193,7 +195,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
         if len(self.deck) == 0:
             return
         self.deck[-1].flip()
-        self.create_deck_display()
+        self.create_display()
 
     # TODO: I don't like how is this done
     def shuffle(self, shuffled=[]):
@@ -204,15 +206,10 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
         for card in self.deck:
             if card.is_front:
                 card.flip()
-        self.create_deck_display()
-
-    def mark_focused(self, is_focused):
-        if self.is_focused != is_focused:
-            self.is_focused = is_focused
-            self.create_deck_display()
+        self.create_display()
 
     def update_zoom(self):
-        self.create_deck_display()
+        self.create_display()
 
 class PlayerHand(pygame.sprite.Sprite, BoardObject):
     def __init__(self, group, game):
@@ -225,10 +222,9 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.draggable = False
         self.deck = []
         self.render = True
-        self.is_focused = False
-        self.create_hand_display()
+        self.create_display()
 
-    def create_hand_display(self):
+    def create_display(self):
         window_width, window_height = self.group.display_surface.get_size()
         width = window_width * 0.8
         height = 250 * self.group.zoom_scale
@@ -260,14 +256,14 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
 
         if self.is_focused:
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
-            gray_overlay.fill((128, 128, 128, 80))
+            gray_overlay.fill((80, 80, 80, 99))
             surface.blit(gray_overlay, (0, 0))
         
         return surface
 
     @property
     def display(self):
-        return self.create_hand_display()
+        return self.create_display()
 
     def add_card(self, card):
         if card not in self.deck:
@@ -298,6 +294,77 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             self.mark_focused(False)
             return False
 
+class Button(pygame.sprite.Sprite, BoardObject):
+    def __init__(self, group, game, text, x, y, width, height, font_size=25):
+        super().__init__(group)
+        BoardObject.__init__(self)
+        self.game = game
+        self.group = group
+        self._type = "button"
+        self.draggable = False
+        self.render = True
+        self.text = text
+        self.rect = pygame.rect.Rect(x, y, width, height)
+        self.original_rect = self.rect.copy()
+        self.font_size = font_size
+        self.create_display()
+
+    def create_display(self):
+        text_color = (0, 0, 0)
+        button_color = (255, 255, 255)
+        border_color = (0, 0, 0)
+        
+        border_thickness = max(1, int(self.rect.height / 50))
+        surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        
+        pygame.draw.rect(surface, button_color, (0, 0, self.rect.width, self.rect.height), border_radius=7)
+        
+        pygame.draw.rect(surface, border_color, (0, 0, self.rect.width, self.rect.height), 
+                         width=border_thickness, border_radius=7)
+
+        font = pygame.font.Font(None, self.font_size)
+        text_surface = font.render(self.text, True, text_color)
+        text_rect = text_surface.get_rect(center=(self.rect.width / 2, self.rect.height / 2))
+        surface.blit(text_surface, text_rect)
+
+        if self.is_focused:
+            gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+            gray_overlay.fill((0, 0, 0, 0))
+            pygame.draw.rect(gray_overlay, (128, 128, 128, 80), (0, 0, self.rect.width, self.rect.height), border_radius=10)
+            surface.blit(gray_overlay, (0, 0))
+        
+        self.display = surface
+        self.game.assign_z_index(self)
+
+    def clicked(self):
+        pass
+
+    def update_zoom(self):
+        self.create_display()
+
+class ShuffleButton(Button):
+
+    def __init__(self, group, game, x, y, width, height, decks, font_size=25):
+        super().__init__(group, game, "Shuffle", x, y, width, height, font_size)
+        self.decks = decks
+
+    def clicked(self):
+        for card_deck in self.decks:
+            card_deck.shuffle()
+
+class RetrieveButton(Button):
+
+    def __init__(self, group, game, x, y, width, height, deck, cards_to_retrieve, font_size=25):
+        super().__init__(group, game, "Retrieve", x, y, width, height, font_size)
+        self.deck = deck
+        self.cards_to_retrieve = cards_to_retrieve
+
+    def clicked(self):
+        for card in self.cards_to_retrieve:
+            if card in self.game.player_hand.deck:
+                self.game.player_hand.remove_card(card)
+            self.deck.add_card(card)
+
 class CameraGroup(pygame.sprite.Group):
     def __init__(self):
         super().__init__()
@@ -307,7 +374,7 @@ class CameraGroup(pygame.sprite.Group):
         self.offset_y = 0
 
     def custom_draw(self):
-        self.display_surface.fill('#71ddee')
+        self.display_surface.fill('#E1E1E1')
 
         screen_rect = self.display_surface.get_rect()
         screen_rect.x = (screen_rect.x - self.offset_x)
@@ -327,7 +394,8 @@ class CameraGroup(pygame.sprite.Group):
         order_priority = {
             "card": 1,
             "card_deck": 2,
-            "player_hand": 3
+            "player_hand": 3,
+            "button": 4
         }
         for sprite in sorted(self.sprites(), key=lambda x : order_priority[x._type]):
             self.update_sprite_pos(sprite)
@@ -409,6 +477,13 @@ class Game:
         self.mp = {}
 
         self.load_game_state()
+
+        # Stuff
+        button_width, button_height = 140, 40
+        button_y = (253 / 2 - button_height / 2)
+        button_x = (-150)
+        button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, [self.mp["0"]], 25)
+        button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, self.mp["0"], list(self.mp["0"].deck), 25)
 
         self.player_hand = PlayerHand(self.camera_group, self)
         self.player_hand._id = "player_hand"
@@ -665,7 +740,7 @@ class NetworkManager:
         card.assign_front(message["is_front"])
         for card_deck in self.game.get_card_decks():
             if card in card_deck.deck:
-                card_deck.create_deck_display()
+                card_deck.create_display()
 
     def add_card_to_card_deck_send(self, card_deck, card):
         if not self.networking_status:
