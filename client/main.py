@@ -114,6 +114,33 @@ class Card(pygame.sprite.Sprite, BoardObject):
     def mark_focused(self, is_focused):
         pass
 
+class OngoingMove:
+    def __init__(self, start_pos, end_pos, count, move_obj, callback_fn):
+        self.start_pos = pygame.Vector2(*start_pos)
+        self.end_pos = pygame.Vector2(*end_pos)
+        self.count = count
+        self.current_count = 0
+        self.move_obj = move_obj
+        self.callback_fn = callback_fn
+
+    def lerp(self, t):
+        return self.start_pos + (self.end_pos - self.start_pos) * t
+
+    def update(self, game):
+        self.current_count += 1
+        if self.is_finished():
+            pos = self.end_pos
+        else:
+            t = self.current_count / self.count 
+            pos = self.lerp(t)
+        game.camera_group.move_sprite_to(self.move_obj, pos.x, pos.y)
+
+    def callback(self):
+        self.callback_fn(self)
+
+    def is_finished(self):
+        return self.current_count >= self.count
+
 class CardDeck(pygame.sprite.Sprite, BoardObject):
     """Represents a card deck in the game."""
     def __init__(self, x, y, width, height, group, game):
@@ -378,6 +405,7 @@ class ShuffleButton(Button):
 
     def __init__(self, group, game, x, y, width, height, decks, font_size=25):
         super().__init__(group, game, "Shuffle", x, y, width, height, font_size)
+        self.game = game
         self.decks = decks
 
     def clicked(self):
@@ -388,14 +416,20 @@ class RetrieveButton(Button):
 
     def __init__(self, group, game, x, y, width, height, deck, cards_to_retrieve, font_size=25):
         super().__init__(group, game, "Retrieve", x, y, width, height, font_size)
+        self.game = game
         self.deck = deck
         self.cards_to_retrieve = cards_to_retrieve
+
 
     def clicked(self):
         for card in self.cards_to_retrieve:
             if card in self.game.player_hand.deck:
                 self.game.player_hand.remove_card(card)
-            self.deck.add_card(card)
+            if card not in self.deck.deck:
+                def callback(event):
+                    self.deck.add_card(event.move_obj)
+                ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 60, card, callback)
+                game.add_ongoing(ongoing_event)
 
 class CameraGroup(pygame.sprite.Group):
     def __init__(self):
@@ -505,6 +539,7 @@ class Game:
         self.z_index_iota = 0
         self.zoom_index = 3
         self.zooms = [0.5, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
+        self.ongoing = []
 
         self.mp = {}
 
@@ -526,7 +561,7 @@ class Game:
         """Main game loop."""
         while self.running:
             self.handle_events()
-            self.camera_group.update()
+            self.handle_ongoing()
             self.camera_group.custom_draw()
             self.network_mg.process_networking()
             pygame.display.update()
@@ -648,6 +683,16 @@ class Game:
                 self.assign_z_index(obj)
                 return True
         return False
+
+    def handle_ongoing(self):
+        for event in self.ongoing[:]:
+            event.update(self)
+            if event.is_finished():
+                self.ongoing.remove(event)
+                event.callback()
+
+    def add_ongoing(self, ongoing_event):
+        self.ongoing.append(ongoing_event)
 
     def assign_z_index(self, obj):
         """
@@ -901,6 +946,7 @@ class NetworkManager:
         self.connect_to_server()
 
 
-g = Game()
-g.run()
+if __name__ == "__main__":
+    game = Game()
+    game.run()
 
