@@ -185,6 +185,9 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
                 return card
         return None
 
+    def hovering(self):
+        pass
+
     def clicked(self):
         self.flip_top()
 
@@ -222,6 +225,8 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.draggable = False
         self.deck = []
         self.render = True
+        self.hovering_card_middle_x = 0
+        self.hovering_card_index = 0
         self.create_display()
 
     def create_display(self):
@@ -244,6 +249,10 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
 
         self.game.assign_z_index(self)
         margin = 10
+        # Needed to determine where hovering card goes
+        self.hovering_card_index = 0
+        closest_dist = float('inf')
+
         for i in range(len(self.deck)):
             card = self.deck[i]
             start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
@@ -254,7 +263,23 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             card.original_rect.y = card.rect.y
             self.game.assign_z_index(card)
 
-        if self.is_focused:
+            dist = abs(self.hovering_card_middle_x - card.rect.centerx)
+            if dist < closest_dist:
+                closest_dist = dist
+                self.hovering_card_index = i
+
+        if self.is_focused and self.hovering_card_index is not None:
+            if len(self.deck) > 0 and closest_dist > self.deck[0].rect.width // 2:
+                self.hovering_card_index = len(self.deck)
+            for i in range(self.hovering_card_index, len(self.deck)):
+                card = self.deck[i]
+                start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
+                start_y = (y - self.group.zoom_scale * self.group.offset_y) / self.group.zoom_scale
+                card.rect.x = start_x + (i + 2) * margin + (i + 1) * card.rect.width / self.group.zoom_scale
+                card.rect.y = start_y + 7
+                card.original_rect.x = card.rect.x
+                card.original_rect.y = card.rect.y
+
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
             gray_overlay.fill((80, 80, 80, 99))
             surface.blit(gray_overlay, (0, 0))
@@ -271,7 +296,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             self.mark_focused(False)
             if not card.is_front:
                 card.flip()
-            self.deck.append(card)
+            self.deck.insert(self.hovering_card_index, card)
 
     def remove_card(self, card):
         if card in self.deck:
@@ -279,6 +304,12 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             if card.is_front:
                 card.flip()
             self.deck.remove(card)
+
+    def hovering(self):
+        pass
+
+    def not_hovering(self):
+        self.mark_focused(False)
 
     def mark_focused(self, is_focused):
         if self.is_focused != is_focused:
@@ -288,6 +319,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         card_rect = card.rect.copy()
         card_rect.topleft = self.group.apply_zoom(*card_rect.topleft)
         if card_rect.colliderect(self.rect):
+            self.hovering_card_middle_x = card_rect.centerx
             self.mark_focused(True)
             return True
         else:
