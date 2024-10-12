@@ -1,16 +1,16 @@
 import socket
 import json
+from collections import namedtuple
 
-# Server setup
 SERVER_IP = 'localhost'
 SERVER_PORT = 23456
 BUFFER_SIZE = 1024
 
-# Single room to store clients and game objects
-clients = set()   # Track connected clients
-game_objects = {} # Track game objects and their positions
+Client = namedtuple('Client', ['name', 'addr'])
 
-# Create a UDP socket
+clients = set()
+game_objects = {}
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((SERVER_IP, SERVER_PORT))
 
@@ -19,8 +19,8 @@ print(f"UDP server listening on {SERVER_IP}:{SERVER_PORT}")
 def broadcast_update(message, sender_addr):
     message = json.dumps(message).encode('utf-8')
     for client in clients:
-        if client != sender_addr:  # Don't send the message back to the sender
-            sock.sendto(message, client)
+        if client.addr != sender_addr:
+            sock.sendto(message, client.addr)
     print(message)
 
 while True:
@@ -28,9 +28,13 @@ while True:
         data, addr = sock.recvfrom(BUFFER_SIZE)
         message = json.loads(data.decode('utf-8'))
 
-        if addr not in clients:
-            clients.add(addr)
-            print(f"New client {addr} connected: {message["name"]}")
+        if message['action'] == 'join':
+            name = message['name']
+            c = Client(message['name'], addr)
+            if c not in clients:
+                clients.add(c)
+                print(f"New client {c} connected")
+            continue
 
         broadcast_update(message, addr)
     except Exception as e:
