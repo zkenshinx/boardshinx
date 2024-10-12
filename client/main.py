@@ -799,7 +799,10 @@ class NetworkManager:
     def __init__(self, game):
         self.networking_status = False
         self.game = game
-        self.SERVER_IP = 'localhost'
+        if len(sys.argv) > 1:
+            self.SERVER_IP = sys.argv[1]
+        else:
+            self.SERVER_IP = 'localhost'
         self.SERVER_PORT = 23456
         self.BUFFER_SIZE = 1024
         self.init_functions()
