@@ -474,6 +474,7 @@ class ShuffleButton(Button):
         super().__init__(group, game, "Shuffle", x, y, width, height, font_size)
         self.game = game
         self.card_deck = card_deck
+        self._type = "shuffle_button"
 
     def clicked(self):
         self.game.network_mg.shuffle_button_clicked_send(self)
@@ -493,6 +494,7 @@ class RetrieveButton(Button):
         self.game = game
         self.deck = deck
         self.cards_to_retrieve = cards_to_retrieve
+        self._type = "retrieve_button"
 
     def clicked(self):
         self.game.network_mg.retrieve_button_clicked_send(self)
@@ -538,8 +540,9 @@ class CameraGroup(pygame.sprite.Group):
         order_priority = {
             "card": 1,
             "card_deck": 2,
-            "player_hand": 3,
-            "button": 4
+            "shuffle_button": 2,
+            "retrieve_button": 2,
+            "player_hand": 100,
         }
         for sprite in sorted(self.sprites(), key=lambda x : order_priority[x._type]):
             self.update_sprite_dimensions(sprite)
@@ -618,40 +621,41 @@ class Game:
         self.mp = {}
 
 
-        def assign_id(obj):
-            if len(self.mp) == 0:
-                iota = 0
-            else:
-                iota = max(self.mp.keys()) + 1
-            obj._id = iota
-            self.mp[obj._id] = obj
-        cards = []
-        for i in range(1, 49):
-            front_path = f"assets/kingdomino/front_{i}.png"
-            back_path = f"assets/kingdomino/back_{i}.png"
-            width = int(390 *  0.7)
-            height = int(192 * 0.7)
-            card = Card(back_path, front_path, 0, 0, width, height, self.camera_group, self)
-            cards.append(card)
-            assign_id(card)
-        card_deck = CardDeck(0, 0, int(390 * 0.75), int(192 * 0.8), self.camera_group, self)
-        assign_id(card_deck)
-        for cards in cards:
-            card_deck.add_card(cards)
-        # self.load_game_state()
+        #def assign_id(obj):
+        #    if len(self.mp) == 0:
+        #        iota = 0
+        #    else:
+        #        iota = max(self.mp.keys()) + 1
+        #    obj._id = iota
+        #    self.mp[obj._id] = obj
+        #cards = []
+        #for i in range(1, 49):
+        #    front_path = f"assets/kingdomino/front_{i}.png"
+        #    back_path = f"assets/kingdomino/back_{i}.png"
+        #    width = int(390 *  0.7)
+        #    height = int(192 * 0.7)
+        #    card = Card(back_path, front_path, 0, 0, width, height, self.camera_group, self)
+        #    cards.append(card)
+        #    assign_id(card)
+        #card_deck = CardDeck(0, 0, int(390 * 0.75), int(192 * 0.8), self.camera_group, self)
+        #assign_id(card_deck)
+        #for cards in cards:
+        #    card_deck.add_card(cards)
 
         # Stuff
-        button_width, button_height = 140, 40
-        button_y = (253 / 2 - button_height / 2)
-        button_x = (-150)
-        shuffle_button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, card_deck, 25)
-        assign_id(shuffle_button)
-        retrieve_button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, card_deck, list(card_deck.deck), 25)
-        assign_id(retrieve_button)
+        #button_width, button_height = 140, 40
+        #button_y = (253 / 2 - button_height / 2)
+        #button_x = (-150)
+        #shuffle_button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, card_deck, 25)
+        #assign_id(shuffle_button)
+        #retrieve_button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, card_deck, list(card_deck.deck), 25)
+        #assign_id(retrieve_button)
 
         # self.player_hand = PlayerHand(self.camera_group, self)
         # self.player_hand._id = "player_hand"
         # self.assign_z_index(self.player_hand)
+        self.load_game_state()
+        # self.save_game_state()
         self.network_mg.set_networking(True)
 
     def run(self):
@@ -861,6 +865,23 @@ class Game:
                     "z_index": sprite.z_index,
                     "deck": [f._id for f in sprite.deck]
                 })
+        for sprite in self.camera_group.sprites():
+            if "button" in sprite._type:
+                arr = {
+                    "type": sprite._type,
+                    "id": sprite._id,
+                    "x": sprite.original_rect.x,
+                    "y": sprite.original_rect.y,
+                    "width": sprite.original_rect.width,
+                    "height": sprite.original_rect.height,
+                    "z_index": sprite.z_index,
+                }
+                if sprite._type == "retrieve_button":
+                    arr["deck"] = sprite.deck._id
+                    arr["cards_to_retrieve"] = [f._id for f in sprite.cards_to_retrieve]
+                elif sprite._type == "shuffle_button":
+                    arr["card_deck"] = sprite.card_deck._id
+                game_state.append(arr)
         with open('game_state.json', 'w') as file:
             json.dump(game_state, file, indent=4)
 
@@ -882,7 +903,18 @@ class Game:
                 for card_id in sprite["deck"]:
                     card_deck.add_card(self.mp[card_id])
                 self.mp[card_deck._id] = card_deck
-
+        for sprite in game_state:
+            if sprite["type"] == "shuffle_button":
+                button = ShuffleButton(self.camera_group, self, sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.mp[sprite["card_deck"]])
+                button.z_index = sprite["z_index"]
+                button._id = sprite["id"]
+            elif sprite["type"] == "retrieve_button":
+                cards_to_retrieve = []
+                for card_id in sprite["cards_to_retrieve"]:
+                    cards_to_retrieve.append(self.mp[card_id])
+                button = RetrieveButton(self.camera_group, self, sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.mp[sprite["deck"]], cards_to_retrieve)
+                button.z_index = sprite["z_index"]
+                button._id = sprite["id"]
     def quit(self):
         """Quit the game and clean up resources."""
         pygame.quit()
