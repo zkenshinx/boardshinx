@@ -1,3 +1,4 @@
+import math
 import zipfile
 from uuid import uuid4
 import json
@@ -517,8 +518,8 @@ class CameraGroup(pygame.sprite.Group):
         super().__init__()
         self.display_surface = pygame.display.get_surface()
         self.zoom_scale = 1
-        self.offset_x = 0
-        self.offset_y = 0
+        self.rotation = 0
+        self.center()
 
     def custom_draw(self):
         self.display_surface.fill('#E1E1E1')
@@ -532,9 +533,17 @@ class CameraGroup(pygame.sprite.Group):
             if sprite.static_rendering:
                 self.display_surface.blit(sprite.display, sprite.rect.topleft)
                 continue
-            if self.colliderect(screen_rect, sprite.rect):
-                offset_pos = self.apply_zoom(*sprite.rect.topleft)
-                self.display_surface.blit(sprite.display, offset_pos)
+            if True or self.colliderect(screen_rect, sprite.rect):
+                pos_x, pos_y = self.apply_zoom(*self.apply_rotation(*sprite.rect.topleft))
+                rotated_sprite = pygame.transform.rotate(sprite.display, self.rotation)
+                if self.rotation == 90:
+                    pos_y -= sprite.rect.width
+                elif self.rotation == 180:
+                    pos_x -= sprite.rect.width
+                    pos_y -= sprite.rect.height
+                elif self.rotation == 270:
+                    pos_x -= sprite.rect.height
+                self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
 
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
@@ -553,6 +562,12 @@ class CameraGroup(pygame.sprite.Group):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
         self.offset_x += rel2[0]
         self.offset_y += rel2[1]
+        return
+        radians = math.radians(self.rotation)
+        dx = rel2[0] * math.cos(radians) - rel2[1] * math.sin(radians)
+        dy = rel2[0] * math.sin(radians) + rel2[1] * math.cos(radians)
+        self.offset_x += dx
+        self.offset_y += dy
 
     def move_sprite_rel(self, sprite, rel):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
@@ -564,7 +579,7 @@ class CameraGroup(pygame.sprite.Group):
         sprite.rect.topleft = (x, y)
 
     def move_sprite_to_centered_zoomed(self, sprite, x, y):
-        x, y = self.reverse_zoom(x, y)
+        x, y = self.reverse_rotation(*self.reverse_zoom(x, y))
         sprite.original_rect.topleft = (x - sprite.original_rect.width / 2, y - sprite.original_rect.height / 2)
         sprite.rect.topleft = (x - sprite.rect.width / (2 * self.zoom_scale), y - sprite.rect.height / (2 * self.zoom_scale))
 
@@ -582,7 +597,7 @@ class CameraGroup(pygame.sprite.Group):
         return normalize(rect1).colliderect(normalize(rect2))
 
     def collidepoint(self, rect, mouse_pos):
-        return rect.collidepoint(self.reverse_zoom(*mouse_pos))
+        return rect.collidepoint(self.reverse_rotation(*self.reverse_zoom(*mouse_pos)))
 
     def apply_zoom(self, x, y):
         zoomed_x = (x + self.offset_x) * self.zoom_scale
@@ -593,6 +608,22 @@ class CameraGroup(pygame.sprite.Group):
         reversed_x = (x / self.zoom_scale) - self.offset_x
         reversed_y = (y / self.zoom_scale) - self.offset_y
         return reversed_x, reversed_y
+
+    def apply_rotation(self, x, y):
+        radians = math.radians(-self.rotation)
+        rotated_x = x * math.cos(radians) - y * math.sin(radians)
+        rotated_y = x * math.sin(radians) + y * math.cos(radians)
+        return rotated_x, rotated_y
+
+    def reverse_rotation(self, x, y):
+        radians = math.radians(self.rotation)
+        reversed_x = x * math.cos(radians) - y * math.sin(radians)
+        reversed_y = x * math.sin(radians) + y * math.cos(radians)
+        return reversed_x, reversed_y
+
+    def center(self):
+        self.offset_x = self.display_surface.get_rect().width / 2
+        self.offset_y = self.display_surface.get_rect().height / 2
 
 class Game:
     WINDOW_WIDTH = 1280
@@ -693,8 +724,12 @@ class Game:
     def key_down(self, event):
         if event.key == pygame.K_ESCAPE:
             self.running = False
-        if event.key in [pygame.K_q, pygame.K_e]:
+        elif event.key in [pygame.K_q, pygame.K_e]:
             self.process_rotation_clicked(event)
+        elif event.key in [pygame.K_r]:
+            self.camera_group.rotation = (self.camera_group.rotation + 90) % 360
+        elif event.key in [pygame.K_c]:
+            self.camera_group.center()
 
     def process_rotation_clicked(self, event):
         direction = 1 if event.key == pygame.K_q else -1
