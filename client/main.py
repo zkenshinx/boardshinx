@@ -36,7 +36,12 @@ class BoardObject:
     def release(self):
         pass
 
+    def rotate(self, direction):
+        pass
+
 class Card(pygame.sprite.Sprite, BoardObject):
+
+    ROTATION_STEP = 90
 
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height, group, game):
@@ -54,57 +59,55 @@ class Card(pygame.sprite.Sprite, BoardObject):
         self.render = True
         self._type = "card"
         self.draggable = True
+        self.rotation = 0
 
         self.set_image()
 
     def set_image(self):
-        if self.is_front:
-            self.display = Card.create_display(self.front_image_path, self.rect.width, self.rect.height)
-        else:
-            self.display = Card.create_display(self.back_image_path, self.rect.width, self.rect.height)
+        image_path = self.front_image_path if self.is_front else self.back_image_path
+        self.display = Card.create_display(image_path, self.rect.width, self.rect.height, self.rotation)
 
     @staticmethod
     @lru_cache(maxsize=4096)
-    def create_display(image_path, width, height):
-        """Create a new image combining the original image and its outline."""
+    def create_display(image_path, width, height, rotation):
         image = pygame.image.load(image_path).convert_alpha()
-        scaled_image = pygame.transform.smoothscale(image, (width, height))
+        rotated_image = pygame.transform.rotate(image, rotation)
+        scaled_image = pygame.transform.smoothscale(rotated_image, (width, height))
         return scaled_image
 
     def update_zoom(self):
         self.set_image()
 
     def assign_front(self, is_front):
-        self.is_front = is_front
-        self.set_image()
+        if self.is_front != is_front:
+            self.is_front = is_front
+            self.set_image()
 
     def clicked(self):
         self.flip()
 
     def holding(self):
-        if self in self.game.player_hand.deck:
+        if hasattr(self.game, "player_hand") and self in self.game.player_hand.deck:
             self.game.player_hand.remove_card(self)
         for card_deck in self.game.get_card_decks():
-            if self.group.colliderect(self.rect, card_deck.rect):
-                card_deck.mark_focused(True)
-            else:
-                card_deck.mark_focused(False)
-        self.game.player_hand.check_collide_with_hand(self)
+            card_deck.mark_focused(self.group.colliderect(self.rect, card_deck.rect))
+        if hasattr(self.game, "player_hand"):
+            self.game.player_hand.check_collide_with_hand(self)
         return self
 
     def release(self):
-        def try_add_card_to_deck(self):
-            for card_deck in self.game.get_card_decks():
-                if self.group.colliderect(self.rect, card_deck.rect):
-                    card_deck.add_card(self)
-                    return True
-            return False
-
-        if try_add_card_to_deck(self):
+        if self._try_add_card_to_deck():
             return
-        
-        if self.game.player_hand.check_collide_with_hand(self):
+
+        if hasattr(self.game, "player_hand") and self.game.player_hand.check_collide_with_hand(self):
             self.game.player_hand.add_card(self)
+
+    def _try_add_card_to_deck(self):
+        for card_deck in self.game.get_card_decks():
+            if self.group.colliderect(self.rect, card_deck.rect):
+                card_deck.add_card(self)
+                return True
+        return False
 
     def flip(self):
         self.is_front = not self.is_front
@@ -113,6 +116,16 @@ class Card(pygame.sprite.Sprite, BoardObject):
 
     def mark_focused(self, is_focused):
         pass
+
+    def rotate(self, direction):
+        self.rotation = (self.rotation + self.ROTATION_STEP * direction) % 360
+        self.rect.width, self.rect.height = self.rect.height, self.rect.width
+        self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
+        self.set_image()
+
+    def reset_rotation(self):
+        while self.rotation != 0:
+            self.rotate(1)
 
 class OngoingMove:
     def __init__(self, start_pos, end_pos, count, move_obj, game, callback_fn=None):
@@ -237,6 +250,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
             if send_message:
                 self.game.network_mg.add_card_to_card_deck_send(self, card)
             self.mark_focused(False)
+            card.reset_rotation()
             card.render = False
             self.deck.append(card)
             self.create_display()
@@ -373,6 +387,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             self.mark_focused(False)
             if not card.is_front:
                 card.flip()
+            card.reset_rotation()
             self.deck.insert(self.hovering_card_index, card)
 
     def remove_card(self, card):
@@ -476,7 +491,7 @@ class RetrieveButton(Button):
 
     def clicked(self):
         for card in self.cards_to_retrieve:
-            if card in self.game.player_hand.deck:
+            if hasattr(self.game, "player_hand") and card in self.game.player_hand.deck:
                 self.game.player_hand.remove_card(card)
             if card not in self.deck.deck:
                 def callback(card):
@@ -573,7 +588,6 @@ class Game:
     WINDOW_WIDTH = 1280
     WINDOW_HEIGHT = 720
     FPS = 60
-    CLICKED_OBJECT_SCALE = 1.1
 
     def __init__(self):
         self.network_mg = NetworkManager(self)
@@ -597,19 +611,42 @@ class Game:
 
         self.mp = {}
 
-        self.load_game_state()
+
+        def assign_id(obj):
+            if len(self.mp) == 0:
+                iota = 0
+            else:
+                iota = max(self.mp.keys()) + 1
+            obj._id = iota
+            self.mp[obj._id] = iota
+        cards = []
+        for i in range(1, 49):
+            front_path = f"assets/kingdomino/front_{i}.png"
+            back_path = f"assets/kingdomino/back_{i}.png"
+            width = int(390 *  0.7)
+            height = int(192 * 0.7)
+            card = Card(back_path, front_path, 0, 0, width, height, self.camera_group, self)
+            cards.append(card)
+            assign_id(card)
+        card_deck = CardDeck(0, 0, int(390 * 0.75), int(192 * 0.8), self.camera_group, self)
+        assign_id(card_deck)
+        for cards in cards:
+            card_deck.add_card(cards)
+        # self.load_game_state()
 
         # Stuff
         button_width, button_height = 140, 40
         button_y = (253 / 2 - button_height / 2)
         button_x = (-150)
-        button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, self.mp["0"], 25)
-        button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, self.mp["0"], list(self.mp["0"].deck), 25)
+        shuffle_button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, card_deck, 25)
+        assign_id(shuffle_button)
+        retrieve_button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, card_deck, list(card_deck.deck), 25)
+        assign_id(retrieve_button)
 
-        self.player_hand = PlayerHand(self.camera_group, self)
-        self.player_hand._id = "player_hand"
-        self.assign_z_index(self.player_hand)
-        self.network_mg.set_networking(True)
+        # self.player_hand = PlayerHand(self.camera_group, self)
+        # self.player_hand._id = "player_hand"
+        # self.assign_z_index(self.player_hand)
+        # self.network_mg.set_networking(True)
 
     def run(self):
         """Main game loop."""
@@ -644,11 +681,13 @@ class Game:
     def key_down(self, event):
         if event.key == pygame.K_ESCAPE:
             self.running = False
-        if event.key == pygame.K_r:
-            for obj in self.camera_group.sprites():
-                if obj._type == "card_deck":
-                    obj.shuffle()
-                    self.network_mg.shuffle_card_deck_send(obj)
+        if event.key in [pygame.K_q, pygame.K_e]:
+            self.process_rotation_clicked(event)
+
+    def process_rotation_clicked(self, event):
+        if self.held_object is not None:
+            direction = 1 if event.key == pygame.K_q else -1
+            self.held_object.rotate(direction)
 
     def mouse_motion(self, event):
         if self.moving_around_board and pygame.mouse.get_pressed()[1]:
