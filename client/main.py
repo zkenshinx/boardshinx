@@ -8,7 +8,7 @@ from functools import lru_cache
 import random
 
 class BoardObject:
-    
+
     def __init__(self):
         self.static_rendering = False
         self.is_focused = False
@@ -117,7 +117,9 @@ class Card(pygame.sprite.Sprite, BoardObject):
     def mark_focused(self, is_focused):
         pass
 
-    def rotate(self, direction):
+    def rotate(self, direction, send_message=True):
+        if send_message:
+            self.game.network_mg.rotate_object_send(self, direction)
         self.rotation = (self.rotation + self.ROTATION_STEP * direction) % 360
         self.rect.width, self.rect.height = self.rect.height, self.rect.width
         self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
@@ -125,7 +127,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
 
     def reset_rotation(self):
         while self.rotation != 0:
-            self.rotate(1)
+            self.rotate(1, False)
 
 class OngoingMove:
     def __init__(self, start_pos, end_pos, count, move_obj, game, callback_fn=None):
@@ -167,7 +169,7 @@ class OngoingShuffle:
         cards_for_animation = 10
         self.top_cards = []
         for i in range(cards_for_animation):
-            top_card = self.card_deck.pop_card()
+            top_card = self.card_deck.pop_card(send_message=False)
             if top_card is None:
                 break
             next = self.generate_random_next_coordinate()
@@ -201,7 +203,7 @@ class OngoingShuffle:
     def is_finished(self):
         if self.step >= 6:
             for card in self.top_cards:
-                self.card_deck.add_card(card)
+                self.card_deck.add_card(card, False)
             return True
 
 class CardDeck(pygame.sprite.Sprite, BoardObject):
@@ -474,11 +476,15 @@ class ShuffleButton(Button):
         self.card_deck = card_deck
 
     def clicked(self):
+        self.game.network_mg.shuffle_button_clicked_send(self)
+        self.shuffle()
+
+    def shuffle(self):
         self.card_deck.shuffle()
         # Animation
         ongoing_shuffle = OngoingShuffle(self.card_deck, self.game)
         self.game.add_ongoing(ongoing_shuffle)
-
+        
 
 class RetrieveButton(Button):
 
@@ -488,15 +494,18 @@ class RetrieveButton(Button):
         self.deck = deck
         self.cards_to_retrieve = cards_to_retrieve
 
-
     def clicked(self):
+        self.game.network_mg.retrieve_button_clicked_send(self)
+        self.retrieve()
+
+    def retrieve(self):
         for card in self.cards_to_retrieve:
             if hasattr(self.game, "player_hand") and card in self.game.player_hand.deck:
                 self.game.player_hand.remove_card(card)
             if card not in self.deck.deck:
                 def callback(card):
                     card.assign_front(False)
-                    self.deck.add_card(card)
+                    self.deck.add_card(card, send_message=False)
                 ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 60, card, self.game, callback)
                 game.add_ongoing(ongoing_event)
 
@@ -643,7 +652,7 @@ class Game:
         # self.player_hand = PlayerHand(self.camera_group, self)
         # self.player_hand._id = "player_hand"
         # self.assign_z_index(self.player_hand)
-        # self.network_mg.set_networking(True)
+        self.network_mg.set_networking(True)
 
     def run(self):
         """Main game loop."""
@@ -682,12 +691,18 @@ class Game:
             self.process_rotation_clicked(event)
 
     def process_rotation_clicked(self, event):
+        direction = 1 if event.key == pygame.K_q else -1
         if self.held_object is not None:
-            direction = 1 if event.key == pygame.K_q else -1
             self.held_object.rotate(direction)
+            return
+        mouse_pos = pygame.mouse.get_pos()
+        for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
+            if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
+                obj.rotate(direction)
+                break
 
     def mouse_motion(self, event):
-        if self.moving_around_board and pygame.mouse.get_pressed()[1]:
+        if self.moving_around_board and (pygame.mouse.get_pressed()[1] or pygame.key.get_mods() & pygame.KMOD_ALT):
             self.process_moving_around_board(event)
         elif self.is_holding_object and self.held_object is not None:
             self.move_held_object(event)
@@ -705,7 +720,7 @@ class Game:
                 sprite.not_hovering()
 
     def mouse_button_down(self, event):
-        if event.button == 2:
+        if event.button == 2 or pygame.key.get_mods() & pygame.KMOD_ALT:
             self.moving_around_board = True
             return 
         elif event.button != 1:
@@ -937,7 +952,7 @@ class NetworkManager:
         card_deck = self.game.mp[message["card_deck_id"]]
         card_deck.pop_card(self.game.mp[message["card_id"]], False)
 
-    def add_card_to_hand_send(self, card, send_message=True):
+    def add_card_to_hand_send(self, card):
         if not self.networking_status:
             return
         message = {
@@ -950,7 +965,7 @@ class NetworkManager:
         card = self.game.mp[message["card_id"]]
         card.render = False
 
-    def remove_card_from_hand_send(self, card, send_message=True):
+    def remove_card_from_hand_send(self, card):
         if not self.networking_status:
             return
         message = {
@@ -964,7 +979,7 @@ class NetworkManager:
         card.assign_front(False)
         card.render = True
 
-    def shuffle_card_deck_send(self, card_deck, send_message=True):
+    def shuffle_card_deck_send(self, card_deck):
         if not self.networking_status:
             return
         message = {
@@ -977,6 +992,43 @@ class NetworkManager:
     def shuffle_card_deck_received(self, message):
         card_deck = self.game.mp[message["card_deck_id"]]
         card_deck.shuffle([self.game.mp[card_id] for card_id in message["deck"]])
+
+    def rotate_object_send(self, obj, direction):
+        if not self.networking_status:
+            return
+        message = {
+            "action": "rotate_object",
+            "object_id": obj._id,
+            "direction": direction
+        }
+        self.send_to_server(message)
+
+    def rotate_object_received(self, message):
+        self.game.mp[message["object_id"]].rotate(message["direction"], False)
+
+    def retrieve_button_clicked_send(self, button):
+        if not self.networking_status:
+            return
+        message = {
+            "action": "retrieve_button_clicked",
+            "button_id": button._id
+        }
+        self.send_to_server(message)
+
+    def retrieve_button_clicked_received(self, message):
+        self.game.mp[message["button_id"]].retrieve()
+
+    def shuffle_button_clicked_send(self, button):
+        if not self.networking_status:
+            return
+        message = {
+            "action": "shuffle_button_clicked",
+            "button_id": button._id
+        }
+        self.send_to_server(message)
+
+    def shuffle_button_clicked_received(self, message):
+        self.game.mp[message["button_id"]].shuffle()
 
     def connect_to_server(self):
         message = {
@@ -1016,6 +1068,9 @@ class NetworkManager:
             "add_card_to_hand": self.add_card_to_hand_received,
             "remove_card_from_hand": self.remove_card_from_hand_received,
             "shuffle_card_deck": self.shuffle_card_deck_received,
+            "rotate_object": self.rotate_object_received,
+            "retrieve_button_clicked": self.retrieve_button_clicked_received,
+            "shuffle_button_clicked": self.shuffle_button_clicked_received,
         }
 
     def set_networking(self, status):
