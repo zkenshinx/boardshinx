@@ -1,3 +1,4 @@
+import zipfile
 from uuid import uuid4
 import json
 import socket
@@ -654,7 +655,8 @@ class Game:
         # self.player_hand = PlayerHand(self.camera_group, self)
         # self.player_hand._id = "player_hand"
         # self.assign_z_index(self.player_hand)
-        self.load_game_state()
+        GameState.load_game_state(self, path="kingdomino.zip")
+        # GameState.save_game_state(self, output_zip_path="kingdomino.zip")
         # self.save_game_state()
         self.network_mg.set_networking(True)
 
@@ -837,9 +839,18 @@ class Game:
     def get_rendered_objects(self):
         return [s for s in self.camera_group.sprites() if s.render]
 
-    def save_game_state(self):
+    def quit(self):
+        """Quit the game and clean up resources."""
+        pygame.quit()
+
+
+class GameState:
+
+    @staticmethod
+    def save_game_state(game, output_zip_path="game_state"):
+        zipf = zipfile.ZipFile(output_zip_path, "w")
         game_state = []
-        for sprite in self.camera_group.sprites():
+        for sprite in game.camera_group.sprites():
             if sprite._type == "card":
                 game_state.append({
                     "type": "card",
@@ -853,7 +864,9 @@ class Game:
                     "z_index": sprite.z_index,
                     "render": sprite.render,
                 })
-        for sprite in self.camera_group.sprites():
+                zipf.write(sprite.front_image_path, sprite.front_image_path)
+                zipf.write(sprite.back_image_path, sprite.back_image_path)
+        for sprite in game.camera_group.sprites():
             if sprite._type == "card_deck":
                 game_state.append({
                     "type": "card_deck",
@@ -865,7 +878,7 @@ class Game:
                     "z_index": sprite.z_index,
                     "deck": [f._id for f in sprite.deck]
                 })
-        for sprite in self.camera_group.sprites():
+        for sprite in game.camera_group.sprites():
             if "button" in sprite._type:
                 arr = {
                     "type": sprite._type,
@@ -882,43 +895,40 @@ class Game:
                 elif sprite._type == "shuffle_button":
                     arr["card_deck"] = sprite.card_deck._id
                 game_state.append(arr)
-        with open('game_state.json', 'w') as file:
-            json.dump(game_state, file, indent=4)
+        zipf.writestr("game_state.json", json.dumps(game_state, indent=2))
 
-    def load_game_state(self):
-        with open('game_state.json', 'r') as file:
+    def load_game_state(game, path="game_state.zip"):
+        zipf = zipfile.ZipFile(path, "r")
+        zipf.extractall()
+        with open("game_state.json", 'r') as file:
             game_state = json.load(file)
         for sprite in game_state:
             if sprite["type"] == "card":
-                card = Card(sprite["back_path"], sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.camera_group, self)
+                card = Card(sprite["back_path"], sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
                 card.z_index = sprite["z_index"]
                 card.render = sprite["render"]
                 card._id = sprite["id"]
-                self.mp[card._id] = card
+                game.mp[card._id] = card
         for sprite in game_state:
             if sprite["type"] == "card_deck":
-                card_deck = CardDeck(sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.camera_group, self)
+                card_deck = CardDeck(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
                 card_deck.z_index = sprite["z_index"]
                 card_deck._id = sprite["id"]
                 for card_id in sprite["deck"]:
-                    card_deck.add_card(self.mp[card_id])
-                self.mp[card_deck._id] = card_deck
+                    card_deck.add_card(game.mp[card_id])
+                game.mp[card_deck._id] = card_deck
         for sprite in game_state:
             if sprite["type"] == "shuffle_button":
-                button = ShuffleButton(self.camera_group, self, sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.mp[sprite["card_deck"]])
+                button = ShuffleButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["card_deck"]])
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
             elif sprite["type"] == "retrieve_button":
                 cards_to_retrieve = []
                 for card_id in sprite["cards_to_retrieve"]:
-                    cards_to_retrieve.append(self.mp[card_id])
-                button = RetrieveButton(self.camera_group, self, sprite["x"], sprite["y"], sprite["width"], sprite["height"], self.mp[sprite["deck"]], cards_to_retrieve)
+                    cards_to_retrieve.append(game.mp[card_id])
+                button = RetrieveButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["deck"]], cards_to_retrieve)
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
-    def quit(self):
-        """Quit the game and clean up resources."""
-        pygame.quit()
-
 
 class NetworkManager:
 
