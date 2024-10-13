@@ -115,7 +115,8 @@ class Card(pygame.sprite.Sprite, BoardObject):
         pass
 
 class OngoingMove:
-    def __init__(self, start_pos, end_pos, count, move_obj, callback_fn):
+    def __init__(self, start_pos, end_pos, count, move_obj, game, callback_fn=None):
+        self.game = game
         self.start_pos = pygame.Vector2(*start_pos)
         self.end_pos = pygame.Vector2(*end_pos)
         self.count = count
@@ -135,11 +136,60 @@ class OngoingMove:
             pos = self.lerp(t)
         game.camera_group.move_sprite_to(self.move_obj, pos.x, pos.y)
 
-    def callback(self):
-        self.callback_fn(self)
+    def is_finished(self):
+        if self.current_count >= self.count:
+            if self.callback_fn is not None:
+                self.callback_fn(self.move_obj)
+            return True
+        return False
+
+class OngoingShuffle:
+    def __init__(self, card_deck, game):
+        self.game = game
+        self.card_deck = card_deck
+        self.step = 0
+        self.step_counter = 0
+
+        # Initial step
+        cards_for_animation = 10
+        self.top_cards = []
+        for i in range(cards_for_animation):
+            top_card = self.card_deck.pop_card()
+            if top_card is None:
+                break
+            next = self.generate_random_next_coordinate()
+            self.game.camera_group.move_sprite_to(top_card, next[0], next[1])
+            self.top_cards.append(top_card)
+            self.game.assign_z_index(top_card)
+
+    def generate_random_next_coordinate(self):
+        diff_left = int(-self.card_deck.original_rect.width * 0.9)
+        diff_right = int(self.card_deck.original_rect.width * 0.2)
+        center = self.card_deck.original_rect.center
+        next_x = center[0] + randint(diff_left, diff_right)
+        next_y = center[1] + randint(diff_left, diff_right)
+        return next_x, next_y
+
+    def update(self, game):
+        limit = 10
+        if self.step_counter % limit == 0:
+            self.step += 1
+            if self.step == 6:
+                return
+            for card in self.top_cards:
+                if self.step == 5:
+                    dest = self.card_deck.original_rect.topleft
+                else:
+                    dest = self.generate_random_next_coordinate()
+                ongoing_event = OngoingMove(card.original_rect.topleft, dest, limit, card, self.game, None)
+                self.game.add_ongoing(ongoing_event)
+        self.step_counter += 1
 
     def is_finished(self):
-        return self.current_count >= self.count
+        if self.step >= 6:
+            for card in self.top_cards:
+                self.card_deck.add_card(card)
+            return True
 
 class CardDeck(pygame.sprite.Sprite, BoardObject):
     """Represents a card deck in the game."""
@@ -403,14 +453,17 @@ class Button(pygame.sprite.Sprite, BoardObject):
 
 class ShuffleButton(Button):
 
-    def __init__(self, group, game, x, y, width, height, decks, font_size=25):
+    def __init__(self, group, game, x, y, width, height, card_deck, font_size=25):
         super().__init__(group, game, "Shuffle", x, y, width, height, font_size)
         self.game = game
-        self.decks = decks
+        self.card_deck = card_deck
 
     def clicked(self):
-        for card_deck in self.decks:
-            card_deck.shuffle()
+        self.card_deck.shuffle()
+        # Animation
+        ongoing_shuffle = OngoingShuffle(self.card_deck, self.game)
+        self.game.add_ongoing(ongoing_shuffle)
+
 
 class RetrieveButton(Button):
 
@@ -426,9 +479,10 @@ class RetrieveButton(Button):
             if card in self.game.player_hand.deck:
                 self.game.player_hand.remove_card(card)
             if card not in self.deck.deck:
-                def callback(event):
-                    self.deck.add_card(event.move_obj)
-                ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 60, card, callback)
+                def callback(card):
+                    card.assign_front(False)
+                    self.deck.add_card(card)
+                ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 60, card, self.game, callback)
                 game.add_ongoing(ongoing_event)
 
 class CameraGroup(pygame.sprite.Group):
@@ -549,7 +603,7 @@ class Game:
         button_width, button_height = 140, 40
         button_y = (253 / 2 - button_height / 2)
         button_x = (-150)
-        button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, [self.mp["0"]], 25)
+        button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, self.mp["0"], 25)
         button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, self.mp["0"], list(self.mp["0"].deck), 25)
 
         self.player_hand = PlayerHand(self.camera_group, self)
@@ -689,7 +743,6 @@ class Game:
             event.update(self)
             if event.is_finished():
                 self.ongoing.remove(event)
-                event.callback()
 
     def add_ongoing(self, ongoing_event):
         self.ongoing.append(ongoing_event)
