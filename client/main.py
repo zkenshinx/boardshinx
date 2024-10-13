@@ -533,7 +533,7 @@ class CameraGroup(pygame.sprite.Group):
             "button": 4
         }
         for sprite in sorted(self.sprites(), key=lambda x : order_priority[x._type]):
-            self.update_sprite_pos(sprite)
+            self.update_sprite_dimensions(sprite)
             sprite.update_zoom()
 
     def move_camera(self, rel):
@@ -551,17 +551,14 @@ class CameraGroup(pygame.sprite.Group):
         sprite.rect.topleft = (x, y)
 
     def move_sprite_to_centered_zoomed(self, sprite, x, y):
-        sprite.rect.center = self.reverse_zoom(x, y)
-        sprite.original_rect.center = sprite.rect.center
+        x, y = self.reverse_zoom(x, y)
+        sprite.original_rect.topleft = (x - sprite.original_rect.width / 2, y - sprite.original_rect.height / 2)
+        sprite.rect.topleft = (x - sprite.rect.width / (2 * self.zoom_scale), y - sprite.rect.height / (2 * self.zoom_scale))
 
-    def update_sprite_pos(self, sprite):
+    def update_sprite_dimensions(self, sprite):
         scale_factor = self.zoom_scale
-        center_x = self.display_surface.get_size()[0] // 2 - self.offset_x
-        center_y = self.display_surface.get_size()[1] // 2 - self.offset_y
         sprite.rect.width = sprite.original_rect.width * scale_factor
         sprite.rect.height = sprite.original_rect.height * scale_factor
-        pos_x = center_x + (sprite.original_rect.x - center_x) * scale_factor + self.offset_x
-        pos_y = center_y + (sprite.original_rect.y - center_y) * scale_factor + self.offset_y
 
     def colliderect(self, rect1, rect2):
         def normalize(rect):
@@ -618,7 +615,7 @@ class Game:
             else:
                 iota = max(self.mp.keys()) + 1
             obj._id = iota
-            self.mp[obj._id] = iota
+            self.mp[obj._id] = obj
         cards = []
         for i in range(1, 49):
             front_path = f"assets/kingdomino/front_{i}.png"
