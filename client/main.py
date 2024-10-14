@@ -43,23 +43,28 @@ class BoardObject:
     def rotate(self, direction):
         pass
 
-class Card(pygame.sprite.Sprite, BoardObject):
+class Image(pygame.sprite.Sprite, BoardObject):
 
-    """Represents a card in the game."""
-    def __init__(self, back_path, front_path, x, y, width, height, group, game):
+    """Represents an image in the game."""
+    def __init__(self, front_path, x, y, width, height, group, game, flipable=False, movable=True, back_path=None):
         super().__init__(group)
         BoardObject.__init__(self)
         self.game  = game
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         self.rect = pygame.rect.Rect(x, y, width, height)
         self.group = group
-        self.back_image_path = back_path
+        self.flipable = flipable
+        self.movable = movable
         self.front_image_path = front_path
-
-        self.is_front = False
+        if self.flipable:
+            self.back_image_path = back_path
+        else:
+            # In case of some bug
+            self.image_image_path = front_path 
+        self.is_front = not self.flipable
         self.z_index = 0
         self.render = True
-        self._type = "card"
+        self._type = "image"
         self.draggable = True
         self.rotation = 0
 
@@ -67,7 +72,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
 
     def set_image(self):
         image_path = self.front_image_path if self.is_front else self.back_image_path
-        self.display = Card.create_display(image_path, self.rect.width, self.rect.height, self.rotation)
+        self.display = Image.create_display(image_path, self.rect.width, self.rect.height, self.rotation)
 
     @staticmethod
     @lru_cache(maxsize=4096)
@@ -81,7 +86,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
         self.set_image()
 
     def assign_front(self, is_front):
-        if self.is_front != is_front:
+        if self.flipable and self.is_front != is_front:
             self.is_front = is_front
             self.set_image()
 
@@ -90,30 +95,32 @@ class Card(pygame.sprite.Sprite, BoardObject):
 
     def holding(self):
         if hasattr(self.game, "player_hand") and self in self.game.player_hand.deck:
-            self.game.player_hand.remove_card(self)
-        for card_deck in self.game.get_card_decks():
-            card_deck.mark_focused(self.group.colliderect(self.rect, card_deck.rect))
+            self.game.player_hand.remove_image(self)
+        for holder in self.game.get_holders():
+            holder.mark_focused(self.group.colliderect(self.rect, holder.rect))
         if hasattr(self.game, "player_hand"):
             self.game.player_hand.check_collide_with_hand(self)
         return self
 
     def release(self):
-        if self._try_add_card_to_deck():
+        if self._try_add_image_to_deck():
             return
 
         if hasattr(self.game, "player_hand") and self.game.player_hand.check_collide_with_hand(self):
-            self.game.player_hand.add_card(self)
+            self.game.player_hand.add_image(self)
 
-    def _try_add_card_to_deck(self):
-        for card_deck in self.game.get_card_decks():
-            if self.group.colliderect(self.rect, card_deck.rect):
-                card_deck.add_card(self)
+    def _try_add_image_to_deck(self):
+        for holder in self.game.get_holders():
+            if self.group.colliderect(self.rect, holder.rect):
+                holder.add_image(self)
                 return True
         return False
 
     def flip(self):
+        if not self.flipable:
+            return
         self.is_front = not self.is_front
-        self.game.network_mg.flip_card_send(self)
+        self.game.network_mg.flip_image_send(self)
         self.set_image()
 
     def mark_focused(self, is_focused):
@@ -161,28 +168,28 @@ class OngoingMove:
         return False
 
 class OngoingShuffle:
-    def __init__(self, card_deck, game):
+    def __init__(self, holder, game):
         self.game = game
-        self.card_deck = card_deck
+        self.holder = holder
         self.step = 0
         self.step_counter = 0
 
         # Initial step
-        cards_for_animation = 10
-        self.top_cards = []
-        for i in range(cards_for_animation):
-            top_card = self.card_deck.pop_card(send_message=False)
-            if top_card is None:
+        images_for_animation = 10
+        self.top_images = []
+        for i in range(images_for_animation):
+            top_image = self.holder.pop_image(send_message=False)
+            if top_image is None:
                 break
             next = self.generate_random_next_coordinate()
-            self.game.camera_group.move_sprite_to(top_card, next[0], next[1])
-            self.top_cards.append(top_card)
-            self.game.assign_z_index(top_card)
+            self.game.camera_group.move_sprite_to(top_image, *next)
+            self.top_images.append(top_image)
+            self.game.assign_z_index(top_image)
 
     def generate_random_next_coordinate(self):
-        diff_left = int(-self.card_deck.original_rect.width * 0.9)
-        diff_right = int(self.card_deck.original_rect.width * 0.2)
-        center = self.card_deck.original_rect.center
+        diff_left = int(-self.holder.original_rect.width * 0.9)
+        diff_right = int(self.holder.original_rect.width * 0.2)
+        center = self.holder.original_rect.center
         next_x = center[0] + randint(diff_left, diff_right)
         next_y = center[1] + randint(diff_left, diff_right)
         return next_x, next_y
@@ -193,23 +200,23 @@ class OngoingShuffle:
             self.step += 1
             if self.step == 6:
                 return
-            for card in self.top_cards:
+            for image in self.top_images:
                 if self.step == 5:
-                    dest = self.card_deck.original_rect.topleft
+                    dest = self.holder.original_rect.topleft
                 else:
                     dest = self.generate_random_next_coordinate()
-                ongoing_event = OngoingMove(card.original_rect.topleft, dest, limit, card, self.game, None)
+                ongoing_event = OngoingMove(image.original_rect.topleft, dest, limit, image, self.game, None)
                 self.game.add_ongoing(ongoing_event)
         self.step_counter += 1
 
     def is_finished(self):
         if self.step >= 6:
-            for card in self.top_cards:
-                self.card_deck.add_card(card, False)
+            for image in self.top_images:
+                self.holder.add_image(image, False)
             return True
 
-class CardDeck(pygame.sprite.Sprite, BoardObject):
-    """Represents a card deck in the game."""
+class Holder(pygame.sprite.Sprite, BoardObject):
+    """Represents an image deck in the game."""
     def __init__(self, x, y, width, height, group, game):
         super().__init__(group)
         BoardObject.__init__(self)
@@ -218,7 +225,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         self.rect = pygame.rect.Rect(x, y, width, height)
         self.z_index = 0
-        self._type = "card_deck"
+        self._type = "holder"
         self.draggable = False
         self.deck = []
         self.render = True
@@ -238,10 +245,10 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
                          width=border_thickness)
 
         if len(self.deck) > 0:
-            top_card = self.deck[-1]
-            top_card_x = (self.rect.width - top_card.rect.width) // 2
-            top_card_y = (self.rect.height - top_card.rect.height) // 2
-            surface.blit(top_card.display, (top_card_x, top_card_y))
+            top_image = self.deck[-1]
+            top_image_x = (self.rect.width - top_image.rect.width) // 2
+            top_image_y = (self.rect.height - top_image.rect.height) // 2
+            surface.blit(top_image.display, (top_image_x, top_image_y))
 
         if self.is_focused:
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
@@ -249,35 +256,35 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
             surface.blit(gray_overlay, (0, 0))
         self.display = surface
 
-    def add_card(self, card, send_message=True):
-        if card not in self.deck:
+    def add_image(self, image, send_message=True):
+        if image not in self.deck:
             if send_message:
-                self.game.network_mg.add_card_to_card_deck_send(self, card)
+                self.game.network_mg.add_image_to_holder_send(self, image)
             self.mark_focused(False)
-            card.reset_rotation()
-            card.render = False
-            self.deck.append(card)
+            image.reset_rotation()
+            image.render = False
+            self.deck.append(image)
             self.create_display()
 
-    def pop_card(self, card=None, send_message=True):
+    def pop_image(self, image=None, send_message=True):
         if len(self.deck) == 0:
             return None
-        if card is None:
+        if image is None:
             last = self.deck[-1]
             if send_message:
-                self.game.network_mg.remove_card_from_card_deck_send(self, last)
+                self.game.network_mg.remove_image_from_holder_send(self, last)
             self.deck = self.deck[:-1]
             self.create_display()
             last.render = True
             return last
         else:
             # In case of networking race condition
-            if card in self.deck:
-                self.deck.remove(card)
+            if image in self.deck:
+                self.deck.remove(image)
                 self.create_display()
-                card.render = True
-                self.game.assign_z_index(card)
-                return card
+                image.render = True
+                self.game.assign_z_index(image)
+                return image
         return None
 
     def hovering(self):
@@ -287,7 +294,7 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
         self.flip_top()
 
     def holding(self):
-        return self.pop_card()
+        return self.pop_image()
 
     def flip_top(self):
         if len(self.deck) == 0:
@@ -301,9 +308,9 @@ class CardDeck(pygame.sprite.Sprite, BoardObject):
             self.deck = random.sample(self.deck, len(self.deck))
         else:
             self.deck = shuffled
-        for card in self.deck:
-            if card.is_front:
-                card.flip()
+        for image in self.deck:
+            if image.is_front:
+                image.flip()
         self.create_display()
 
     def update_zoom(self):
@@ -320,8 +327,8 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.draggable = False
         self.deck = []
         self.render = True
-        self.hovering_card_middle_x = 0
-        self.hovering_card_index = 0
+        self.hovering_image_middle_x = 0
+        self.hovering_image_index = 0
         self.create_display()
 
     def create_display(self):
@@ -344,36 +351,36 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
 
         self.game.assign_z_index(self)
         margin = 10
-        # Needed to determine where hovering card goes
-        self.hovering_card_index = 0
+        # Needed to determine where hovering image goes
+        self.hovering_image_index = 0
         closest_dist = float('inf')
 
         for i in range(len(self.deck)):
-            card = self.deck[i]
+            image = self.deck[i]
             start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
             start_y = (y - self.group.zoom_scale * self.group.offset_y) / self.group.zoom_scale
-            card.rect.x = start_x + (i + 1) * margin + i * card.rect.width / self.group.zoom_scale
-            card.rect.y = start_y + 7
-            card.original_rect.x = card.rect.x
-            card.original_rect.y = card.rect.y
-            self.game.assign_z_index(card)
+            image.rect.x = start_x + (i + 1) * margin + i * image.rect.width / self.group.zoom_scale
+            image.rect.y = start_y + 7
+            image.original_rect.x = image.rect.x
+            image.original_rect.y = image.rect.y
+            self.game.assign_z_index(image)
 
-            dist = abs(self.hovering_card_middle_x - card.rect.centerx)
+            dist = abs(self.hovering_image_middle_x - image.rect.centerx)
             if dist < closest_dist:
                 closest_dist = dist
-                self.hovering_card_index = i
+                self.hovering_image_index = i
 
-        if self.is_focused and self.hovering_card_index is not None:
+        if self.is_focused and self.hovering_image_index is not None:
             if len(self.deck) > 0 and closest_dist > self.deck[0].rect.width // 2:
-                self.hovering_card_index = len(self.deck)
-            for i in range(self.hovering_card_index, len(self.deck)):
-                card = self.deck[i]
+                self.hovering_image_index = len(self.deck)
+            for i in range(self.hovering_image_index, len(self.deck)):
+                image = self.deck[i]
                 start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
                 start_y = (y - self.group.zoom_scale * self.group.offset_y) / self.group.zoom_scale
-                card.rect.x = start_x + (i + 2) * margin + (i + 1) * card.rect.width / self.group.zoom_scale
-                card.rect.y = start_y + 7
-                card.original_rect.x = card.rect.x
-                card.original_rect.y = card.rect.y
+                image.rect.x = start_x + (i + 2) * margin + (i + 1) * image.rect.width / self.group.zoom_scale
+                image.rect.y = start_y + 7
+                image.original_rect.x = image.rect.x
+                image.original_rect.y = image.rect.y
 
             gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
             gray_overlay.fill((80, 80, 80, 99))
@@ -385,21 +392,21 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
     def display(self):
         return self.create_display()
 
-    def add_card(self, card):
-        if card not in self.deck:
-            self.game.network_mg.add_card_to_hand_send(card)
+    def add_image(self, image):
+        if image not in self.deck:
+            self.game.network_mg.add_image_to_hand_send(image)
             self.mark_focused(False)
-            if not card.is_front:
-                card.flip()
-            card.reset_rotation()
-            self.deck.insert(self.hovering_card_index, card)
+            if not image.is_front:
+                image.flip()
+            image.reset_rotation()
+            self.deck.insert(self.hovering_image_index, image)
 
-    def remove_card(self, card):
-        if card in self.deck:
-            self.game.network_mg.remove_card_from_hand_send(card)
-            if card.is_front:
-                card.flip()
-            self.deck.remove(card)
+    def remove_image(self, image):
+        if image in self.deck:
+            self.game.network_mg.remove_image_from_hand_send(image)
+            if image.is_front:
+                image.flip()
+            self.deck.remove(image)
 
     def hovering(self):
         pass
@@ -411,11 +418,11 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         if self.is_focused != is_focused:
             self.is_focused = is_focused
 
-    def check_collide_with_hand(self, card):
-        card_rect = card.rect.copy()
-        card_rect.topleft = self.group.apply_zoom(*card_rect.topleft)
-        if card_rect.colliderect(self.rect):
-            self.hovering_card_middle_x = card_rect.centerx
+    def check_collide_with_hand(self, image):
+        image_rect = image.rect.copy()
+        image_rect.topleft = self.group.apply_zoom(*image_rect.topleft)
+        if image_rect.colliderect(self.rect):
+            self.hovering_image_middle_x = image_rect.centerx
             self.mark_focused(True)
             return True
         else:
@@ -472,10 +479,10 @@ class Button(pygame.sprite.Sprite, BoardObject):
 
 class ShuffleButton(Button):
 
-    def __init__(self, group, game, x, y, width, height, card_deck, font_size=25):
+    def __init__(self, group, game, x, y, width, height, holder, font_size=25):
         super().__init__(group, game, "Shuffle", x, y, width, height, font_size)
         self.game = game
-        self.card_deck = card_deck
+        self.holder = holder
         self._type = "shuffle_button"
 
     def clicked(self):
@@ -483,19 +490,19 @@ class ShuffleButton(Button):
         self.shuffle()
 
     def shuffle(self):
-        self.card_deck.shuffle()
+        self.holder.shuffle()
         # Animation
-        ongoing_shuffle = OngoingShuffle(self.card_deck, self.game)
+        ongoing_shuffle = OngoingShuffle(self.holder, self.game)
         self.game.add_ongoing(ongoing_shuffle)
         
 
 class RetrieveButton(Button):
 
-    def __init__(self, group, game, x, y, width, height, deck, cards_to_retrieve, font_size=25):
+    def __init__(self, group, game, x, y, width, height, deck, images_to_retrieve, font_size=25):
         super().__init__(group, game, "Retrieve", x, y, width, height, font_size)
         self.game = game
         self.deck = deck
-        self.cards_to_retrieve = cards_to_retrieve
+        self.images_to_retrieve = images_to_retrieve
         self._type = "retrieve_button"
 
     def clicked(self):
@@ -503,14 +510,14 @@ class RetrieveButton(Button):
         self.retrieve()
 
     def retrieve(self):
-        for card in self.cards_to_retrieve:
-            if hasattr(self.game, "player_hand") and card in self.game.player_hand.deck:
-                self.game.player_hand.remove_card(card)
-            if card not in self.deck.deck:
-                def callback(card):
-                    card.assign_front(False)
-                    self.deck.add_card(card, send_message=False)
-                ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 45, card, self.game, callback)
+        for image in self.images_to_retrieve:
+            if hasattr(self.game, "player_hand") and image in self.game.player_hand.deck:
+                self.game.player_hand.remove_image(image)
+            if image not in self.deck.deck:
+                def callback(image):
+                    image.assign_front(False)
+                    self.deck.add_image(image, send_message=False)
+                ongoing_event = OngoingMove(image.rect.topleft, self.deck.rect.topleft, 45, image, self.game, callback)
                 game.add_ongoing(ongoing_event)
 
 class CameraGroup(pygame.sprite.Group):
@@ -548,8 +555,8 @@ class CameraGroup(pygame.sprite.Group):
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
         order_priority = {
-            "card": 1,
-            "card_deck": 2,
+            "image": 1,
+            "holder": 2,
             "shuffle_button": 2,
             "retrieve_button": 2,
             "player_hand": 100,
@@ -660,34 +667,34 @@ class Game:
         #        iota = max(self.mp.keys()) + 1
         #    obj._id = iota
         #    self.mp[obj._id] = obj
-        #cards = []
+        #images = []
         #for i in range(1, 49):
         #    front_path = f"assets/kingdomino/front_{i}.png"
         #    back_path = f"assets/kingdomino/back_{i}.png"
         #    width = int(390 *  0.7)
         #    height = int(192 * 0.7)
-        #    card = Card(back_path, front_path, 0, 0, width, height, self.camera_group, self)
-        #    cards.append(card)
-        #    assign_id(card)
-        #card_deck = CardDeck(0, 0, int(390 * 0.75), int(192 * 0.8), self.camera_group, self)
-        #assign_id(card_deck)
-        #for cards in cards:
-        #    card_deck.add_card(cards)
+        #    image = Image(front_path, 0, 0, width, height, self.camera_group, self, flipable=True, back_path=back_path)
+        #    images.append(image)
+        #    assign_id(image)
+        #holder = Holder(0, 0, int(390 * 0.75), int(192 * 0.8), self.camera_group, self)
+        #assign_id(holder)
+        #for image in images:
+        #    holder.add_image(image)
 
-        # Stuff
+        ## Stuff
         #button_width, button_height = 140, 40
         #button_y = (253 / 2 - button_height / 2)
         #button_x = (-150)
-        #shuffle_button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, card_deck, 25)
+        #shuffle_button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, holder, 25)
         #assign_id(shuffle_button)
-        #retrieve_button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, card_deck, list(card_deck.deck), 25)
+        #retrieve_button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, holder, list(holder.deck), 25)
         #assign_id(retrieve_button)
 
         # self.player_hand = PlayerHand(self.camera_group, self)
         # self.player_hand._id = "player_hand"
         # self.assign_z_index(self.player_hand)
         GameState.load_game_state(self, path="kingdomino.zip")
-        # GameState.save_game_state(self, output_zip_path="kingdomino.zip")
+        #GameState.save_game_state(self, output_zip_path="kingdomino.zip")
         # self.save_game_state()
         self.network_mg.set_networking(True)
 
@@ -896,8 +903,8 @@ class Game:
             self.zoom_index = next_zoom_index
             self.camera_group.zoom(self.zooms[self.zoom_index])
 
-    def get_card_decks(self):
-        return [item for item in self.camera_group.sprites() if item._type == "card_deck"]
+    def get_holders(self):
+        return [item for item in self.camera_group.sprites() if item._type == "holder"]
 
     def get_rendered_objects(self):
         return [s for s in self.camera_group.sprites() if s.render]
@@ -914,25 +921,27 @@ class GameState:
         zipf = zipfile.ZipFile(output_zip_path, "w")
         game_state = []
         for sprite in game.camera_group.sprites():
-            if sprite._type == "card":
+            if sprite._type == "image":
                 game_state.append({
-                    "type": "card",
+                    "type": "image",
                     "id": sprite._id,
                     "x": sprite.original_rect.x,
                     "y": sprite.original_rect.y,
                     "width": sprite.original_rect.width,
                     "height": sprite.original_rect.height,
-                    "back_path": sprite.back_image_path,
                     "front_path": sprite.front_image_path,
                     "z_index": sprite.z_index,
                     "render": sprite.render,
+                    "flipable": sprite.flipable
                 })
+                if sprite.flipable:
+                    game_state[-1]["back_path"] = sprite.back_image_path
+                    zipf.write(sprite.back_image_path, sprite.back_image_path)
                 zipf.write(sprite.front_image_path, sprite.front_image_path)
-                zipf.write(sprite.back_image_path, sprite.back_image_path)
         for sprite in game.camera_group.sprites():
-            if sprite._type == "card_deck":
+            if sprite._type == "holder":
                 game_state.append({
-                    "type": "card_deck",
+                    "type": "holder",
                     "id": sprite._id,
                     "x": sprite.original_rect.x,
                     "y": sprite.original_rect.y,
@@ -953,10 +962,10 @@ class GameState:
                     "z_index": sprite.z_index,
                 }
                 if sprite._type == "retrieve_button":
-                    arr["deck"] = sprite.deck._id
-                    arr["cards_to_retrieve"] = [f._id for f in sprite.cards_to_retrieve]
+                    arr["holder"] = sprite.deck._id
+                    arr["images_to_retrieve"] = [f._id for f in sprite.images_to_retrieve]
                 elif sprite._type == "shuffle_button":
-                    arr["card_deck"] = sprite.card_deck._id
+                    arr["holder"] = sprite.holder._id
                 game_state.append(arr)
         zipf.writestr("game_state.json", json.dumps(game_state, indent=2))
 
@@ -966,30 +975,33 @@ class GameState:
         with open("game_state.json", 'r') as file:
             game_state = json.load(file)
         for sprite in game_state:
-            if sprite["type"] == "card":
-                card = Card(sprite["back_path"], sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
-                card.z_index = sprite["z_index"]
-                card.render = sprite["render"]
-                card._id = sprite["id"]
-                game.mp[card._id] = card
+            if sprite["type"] == "image":
+                if sprite["flipable"]:
+                    image = Image(sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game, flipable=True, back_path=sprite["back_path"])
+                else:
+                    image = Image(sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                image.z_index = sprite["z_index"]
+                image.render = sprite["render"]
+                image._id = sprite["id"]
+                game.mp[image._id] = image
         for sprite in game_state:
-            if sprite["type"] == "card_deck":
-                card_deck = CardDeck(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
-                card_deck.z_index = sprite["z_index"]
-                card_deck._id = sprite["id"]
-                for card_id in sprite["deck"]:
-                    card_deck.add_card(game.mp[card_id])
-                game.mp[card_deck._id] = card_deck
+            if sprite["type"] == "holder":
+                holder = Holder(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                holder.z_index = sprite["z_index"]
+                holder._id = sprite["id"]
+                for image_id in sprite["deck"]:
+                    holder.add_image(game.mp[image_id])
+                game.mp[holder._id] = holder
         for sprite in game_state:
             if sprite["type"] == "shuffle_button":
-                button = ShuffleButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["card_deck"]])
+                button = ShuffleButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]])
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
             elif sprite["type"] == "retrieve_button":
-                cards_to_retrieve = []
-                for card_id in sprite["cards_to_retrieve"]:
-                    cards_to_retrieve.append(game.mp[card_id])
-                button = RetrieveButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["deck"]], cards_to_retrieve)
+                images_to_retrieve = []
+                for image_id in sprite["images_to_retrieve"]:
+                    images_to_retrieve.append(game.mp[image_id])
+                button = RetrieveButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]], images_to_retrieve)
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
 
@@ -1011,92 +1023,92 @@ class NetworkManager:
         y = message["y"]
         self.game.camera_group.move_sprite_to(self.game.mp[message["object_id"]], x, y)
 
-    def flip_card_send(self, card):
+    def flip_image_send(self, image):
         if not self.networking_status:
             return
         message = {
-            "action": "flip_card",
-            "card_id": card._id,
-            "is_front": card.is_front
+            "action": "flip_image",
+            "image_id": image._id,
+            "is_front": image.is_front
         }
         self.send_to_server(message)
 
-    def flip_card_received(self, message):
-        card = self.game.mp[message["card_id"]]
-        card.assign_front(message["is_front"])
-        for card_deck in self.game.get_card_decks():
-            if card in card_deck.deck:
-                card_deck.create_display()
+    def flip_image_received(self, message):
+        image = self.game.mp[message["image_id"]]
+        image.assign_front(message["is_front"])
+        for holder in self.game.get_holders():
+            if image in holder.deck:
+                holder.create_display()
 
-    def add_card_to_card_deck_send(self, card_deck, card):
+    def add_image_to_holder_send(self, holder, image):
         if not self.networking_status:
             return
         message = {
-            "action": "add_card_to_card_deck",
-            "card_id": card._id,
-            "card_deck_id": card_deck._id
+            "action": "add_image_to_holder",
+            "image_id": image._id,
+            "holder_id": holder._id
         }
         self.send_to_server(message)
 
-    def add_card_to_card_deck_received(self, message):
-        card_deck = self.game.mp[message["card_deck_id"]]
-        card = self.game.mp[message["card_id"]]
-        card_deck.add_card(card, False)
+    def add_image_to_holder_received(self, message):
+        holder = self.game.mp[message["holder_id"]]
+        image = self.game.mp[message["image_id"]]
+        holder.add_image(image, False)
 
-    def remove_card_from_card_deck_send(self, card_deck, card):
+    def remove_image_from_holder_send(self, holder, image):
         if not self.networking_status:
             return
         message = {
-            "action": "remove_card_from_card_deck",
-            "card_id": card._id,
-            "card_deck_id": card_deck._id
+            "action": "remove_image_from_holder",
+            "image_id": image._id,
+            "holder_id": holder._id
         }
         self.send_to_server(message)
 
-    def remove_card_from_card_deck_received(self, message):
-        card_deck = self.game.mp[message["card_deck_id"]]
-        card_deck.pop_card(self.game.mp[message["card_id"]], False)
+    def remove_image_from_holder_received(self, message):
+        holder = self.game.mp[message["holder_id"]]
+        holder.pop_image(self.game.mp[message["image_id"]], False)
 
-    def add_card_to_hand_send(self, card):
+    def add_image_to_hand_send(self, image):
         if not self.networking_status:
             return
         message = {
-            "action": "add_card_to_hand",
-            "card_id": card._id
+            "action": "add_image_to_hand",
+            "image_id": image._id
         }
         self.send_to_server(message)
 
-    def add_card_to_hand_received(self, message):
-        card = self.game.mp[message["card_id"]]
-        card.render = False
+    def add_image_to_hand_received(self, message):
+        image = self.game.mp[message["image_id"]]
+        image.render = False
 
-    def remove_card_from_hand_send(self, card):
+    def remove_image_from_hand_send(self, image):
         if not self.networking_status:
             return
         message = {
-            "action": "remove_card_from_hand",
-            "card_id": card._id
+            "action": "remove_image_front_hand",
+            "image_id": image._id
         }
         self.send_to_server(message)
 
-    def remove_card_from_hand_received(self, message):
-        card = self.game.mp[message["card_id"]]
-        card.assign_front(False)
-        card.render = True
+    def remove_image_from_hand_received(self, message):
+        image = self.game.mp[message["image_id"]]
+        image.assign_front(False)
+        image.render = True
 
-    def shuffle_card_deck_send(self, card_deck):
+    def shuffle_holder_send(self, holder):
         if not self.networking_status:
             return
         message = {
-            "action": "shuffle_card_deck",
-            "card_deck_id": card_deck._id,
-            "deck": [f._id for f in card_deck.deck]
+            "action": "shuffle_holder",
+            "holder_id": holder._id,
+            "deck": [f._id for f in holder.deck]
         }
         self.send_to_server(message)
 
-    def shuffle_card_deck_received(self, message):
-        card_deck = self.game.mp[message["card_deck_id"]]
-        card_deck.shuffle([self.game.mp[card_id] for card_id in message["deck"]])
+    def shuffle_holder_received(self, message):
+        holder = self.game.mp[message["holder_id"]]
+        holder.shuffle([self.game.mp[image_id] for image_id in message["deck"]])
 
     def rotate_object_send(self, obj, direction):
         if not self.networking_status:
@@ -1166,13 +1178,13 @@ class NetworkManager:
 
     def init_functions(self):
         self.received_mapping = {
-            "flip_card": self.flip_card_received,
+            "flip_image": self.flip_image_received,
             "move_object": self.move_object_received,
-            "add_card_to_card_deck": self.add_card_to_card_deck_received,
-            "remove_card_from_card_deck": self.remove_card_from_card_deck_received,
-            "add_card_to_hand": self.add_card_to_hand_received,
-            "remove_card_from_hand": self.remove_card_from_hand_received,
-            "shuffle_card_deck": self.shuffle_card_deck_received,
+            "add_image_to_holder": self.add_image_to_holder_received,
+            "remove_image_from_holder": self.remove_image_from_holder_received,
+            "add_image_to_hand": self.add_image_to_hand_received,
+            "remove_image_from_hand": self.remove_image_from_hand_received,
+            "shuffle_holder": self.shuffle_holder_received,
             "rotate_object": self.rotate_object_received,
             "retrieve_button_clicked": self.retrieve_button_clicked_received,
             "shuffle_button_clicked": self.shuffle_button_clicked_received,
