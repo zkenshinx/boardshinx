@@ -9,6 +9,8 @@ from random import randint
 from functools import lru_cache
 import random
 
+ROTATION_STEP = 90
+
 class BoardObject:
 
     def __init__(self):
@@ -42,8 +44,6 @@ class BoardObject:
         pass
 
 class Card(pygame.sprite.Sprite, BoardObject):
-
-    ROTATION_STEP = 90
 
     """Represents a card in the game."""
     def __init__(self, back_path, front_path, x, y, width, height, group, game):
@@ -122,7 +122,7 @@ class Card(pygame.sprite.Sprite, BoardObject):
     def rotate(self, direction, send_message=True):
         if send_message:
             self.game.network_mg.rotate_object_send(self, direction)
-        self.rotation = (self.rotation + self.ROTATION_STEP * direction) % 360
+        self.rotation = (self.rotation + ROTATION_STEP * direction) % 360
         self.rect.width, self.rect.height = self.rect.height, self.rect.width
         self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
         self.set_image()
@@ -510,7 +510,7 @@ class RetrieveButton(Button):
                 def callback(card):
                     card.assign_front(False)
                     self.deck.add_card(card, send_message=False)
-                ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 60, card, self.game, callback)
+                ongoing_event = OngoingMove(card.rect.topleft, self.deck.rect.topleft, 45, card, self.game, callback)
                 game.add_ongoing(ongoing_event)
 
 class CameraGroup(pygame.sprite.Group):
@@ -562,12 +562,10 @@ class CameraGroup(pygame.sprite.Group):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
         self.offset_x += rel2[0]
         self.offset_y += rel2[1]
-        return
-        radians = math.radians(self.rotation)
-        dx = rel2[0] * math.cos(radians) - rel2[1] * math.sin(radians)
-        dy = rel2[0] * math.sin(radians) + rel2[1] * math.cos(radians)
-        self.offset_x += dx
-        self.offset_y += dy
+
+    def move_sprite_abs(self, sprite, abs):
+        sprite.original_rect.move_ip(abs)
+        sprite.rect.move_ip(abs)
 
     def move_sprite_rel(self, sprite, rel):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
@@ -645,6 +643,8 @@ class Game:
         self.is_holding_object = False
         self.moved_holding_object = False
         self.held_object = None
+        self.last_held_object = None
+        self.held_down_counter = 0
         self.z_index_iota = 0
         self.zoom_index = 3
         self.zooms = [0.5, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
@@ -710,6 +710,8 @@ class Game:
             self.handle_input(event)
 
     def handle_input(self, event):
+        if event.type == pygame.KEYUP:
+            self.held_down_counter = 0
         if event.type == pygame.KEYDOWN:
             self.key_down(event)
         if event.type == pygame.MOUSEMOTION:
@@ -720,19 +722,44 @@ class Game:
             self.mouse_button_down(event)
         elif event.type == pygame.MOUSEBUTTONUP:
             self.mouse_button_up(event)
+        else:
+            self.move_last_held_object()
+
 
     def key_down(self, event):
         if event.key == pygame.K_ESCAPE:
             self.running = False
         elif event.key in [pygame.K_q, pygame.K_e]:
             self.process_rotation_clicked(event)
-        elif event.key in [pygame.K_r]:
-            self.camera_group.rotation = (self.camera_group.rotation + 90) % 360
         elif event.key in [pygame.K_c]:
             self.camera_group.center()
+        elif event.key in [pygame.K_j, pygame.K_i, pygame.K_k, pygame.K_l]:
+            self.move_last_held_object(False)
+
+    def move_last_held_object(self, count=True):
+        if count:
+            self.held_down_counter += 1
+            if self.held_down_counter <= 7:
+                return
+        keys = pygame.key.get_pressed()
+        dx, dy = 0, 0
+        if keys[pygame.K_j]:
+            dx = -1
+        elif keys[pygame.K_l]:
+            dx = 1
+        elif keys[pygame.K_i]:
+            dy = -1
+        elif keys[pygame.K_k]:
+            dy = 1
+        else:
+            return
+        self.camera_group.move_sprite_abs(self.last_held_object, (dx, dy))
 
     def process_rotation_clicked(self, event):
         direction = 1 if event.key == pygame.K_q else -1
+        if pygame.key.get_mods() & pygame.KMOD_SHIFT:
+            self.camera_group.rotation = (self.camera_group.rotation + direction * ROTATION_STEP) % 360
+            return
         if self.held_object is not None:
             self.held_object.rotate(direction)
             return
@@ -797,6 +824,7 @@ class Game:
 
     def reset_held_object(self):
         self.is_holding_object = False
+        self.last_held_object = self.held_object
         self.held_object = None
         self.moved_holding_object = False
 
