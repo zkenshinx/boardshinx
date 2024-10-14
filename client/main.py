@@ -16,6 +16,10 @@ class BoardObject:
     def __init__(self):
         self.static_rendering = False
         self.is_focused = False
+        self.draggable = False
+
+    def update(self):
+        pass
 
     def update_zoom(self):
         pass
@@ -46,7 +50,7 @@ class BoardObject:
 class Image(pygame.sprite.Sprite, BoardObject):
 
     """Represents an image in the game."""
-    def __init__(self, front_path, x, y, width, height, group, game, flipable=False, movable=True, back_path=None):
+    def __init__(self, front_path, x, y, width, height, group, game, flipable=False, draggable=True, rotatable=True, back_path=None):
         super().__init__(group)
         BoardObject.__init__(self)
         self.game  = game
@@ -54,23 +58,23 @@ class Image(pygame.sprite.Sprite, BoardObject):
         self.rect = pygame.rect.Rect(x, y, width, height)
         self.group = group
         self.flipable = flipable
-        self.movable = movable
         self.front_image_path = front_path
         if self.flipable:
             self.back_image_path = back_path
         else:
             # In case of some bug
             self.image_image_path = front_path 
+        self.rotatable = rotatable
         self.is_front = not self.flipable
         self.z_index = 0
         self.render = True
         self._type = "image"
-        self.draggable = True
+        self.draggable = draggable
         self.rotation = 0
 
-        self.set_image()
+        self.update()
 
-    def set_image(self):
+    def update(self):
         image_path = self.front_image_path if self.is_front else self.back_image_path
         self.display = Image.create_display(image_path, self.rect.width, self.rect.height, self.rotation)
 
@@ -83,12 +87,12 @@ class Image(pygame.sprite.Sprite, BoardObject):
         return scaled_image
 
     def update_zoom(self):
-        self.set_image()
+        self.update()
 
     def assign_front(self, is_front):
         if self.flipable and self.is_front != is_front:
             self.is_front = is_front
-            self.set_image()
+            self.update()
 
     def clicked(self):
         self.flip()
@@ -121,7 +125,7 @@ class Image(pygame.sprite.Sprite, BoardObject):
             return
         self.is_front = not self.is_front
         self.game.network_mg.flip_image_send(self)
-        self.set_image()
+        self.update()
 
     def mark_focused(self, is_focused):
         pass
@@ -132,7 +136,69 @@ class Image(pygame.sprite.Sprite, BoardObject):
         self.rotation = (self.rotation + ROTATION_STEP * direction) % 360
         self.rect.width, self.rect.height = self.rect.height, self.rect.width
         self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
-        self.set_image()
+        self.update()
+
+    def reset_rotation(self):
+        while self.rotation != 0:
+            self.rotate(1, False)
+
+class Dice(pygame.sprite.Sprite, BoardObject):
+
+    """Represents a dice in the game."""
+    def __init__(self, paths, x, y, width, height, group, game, draggable=True, rotatable=True):
+        super().__init__(group)
+        BoardObject.__init__(self)
+        self.game = game
+        self.original_rect = pygame.rect.Rect(x, y, width, height)
+        self.rect = pygame.rect.Rect(x, y, width, height)
+        self.group = group
+        self.rotatable = rotatable
+        self.z_index = 0
+        self.render = True
+        self._type = "dice"
+        self.draggable = draggable
+        self.rotation = 0
+
+        self.paths = paths
+        self.current_image_path = paths[0]
+
+        self.update()
+
+    def update(self):
+        self.display = Image.create_display(self.current_image_path, self.rect.width, self.rect.height, self.rotation)
+
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def create_display(image_path, width, height, rotation):
+        image = pygame.image.load(image_path).convert_alpha()
+        rotated_image = pygame.transform.rotate(image, rotation)
+        scaled_image = pygame.transform.smoothscale(rotated_image, (width, height))
+        return scaled_image
+
+    def update_zoom(self):
+        self.update()
+
+    def clicked(self):
+        self.roll()
+
+    def roll(self):
+        ongoing_event = OngoingRoll(self, self.game)
+        self.game.add_ongoing(ongoing_event)
+
+    def set_random(self):
+        self.current_image_path = random.choice(self.paths)
+        self.update()
+
+    def mark_focused(self, is_focused):
+        pass
+
+    def rotate(self, direction, send_message=True):
+        if send_message:
+            self.game.network_mg.rotate_object_send(self, direction)
+        self.rotation = (self.rotation + ROTATION_STEP * direction) % 360
+        self.rect.width, self.rect.height = self.rect.height, self.rect.width
+        self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
+        self.update()
 
     def reset_rotation(self):
         while self.rotation != 0:
@@ -151,14 +217,14 @@ class OngoingMove:
     def lerp(self, t):
         return self.start_pos + (self.end_pos - self.start_pos) * t
 
-    def update(self, game):
+    def update(self):
         self.current_count += 1
         if self.is_finished():
             pos = self.end_pos
         else:
             t = self.current_count / self.count 
             pos = self.lerp(t)
-        game.camera_group.move_sprite_to(self.move_obj, pos.x, pos.y)
+        self.game.camera_group.move_sprite_to(self.move_obj, pos.x, pos.y)
 
     def is_finished(self):
         if self.current_count >= self.count:
@@ -194,7 +260,7 @@ class OngoingShuffle:
         next_y = center[1] + randint(diff_left, diff_right)
         return next_x, next_y
 
-    def update(self, game):
+    def update(self):
         limit = 10
         if self.step_counter % limit == 0:
             self.step += 1
@@ -215,6 +281,34 @@ class OngoingShuffle:
                 self.holder.add_image(image, False)
             return True
 
+class OngoingRoll:
+    def __init__(self, dice, game):
+        self.game = game
+        self.dice = dice
+        self.step = 0
+        self.start_rect = self.dice.original_rect.copy()
+
+    def generate_random_next_coordinate(self):
+        diff_left = int(-self.start_rect.width * 0.1)
+        diff_right = int(self.start_rect.width * 0.1)
+        topleft = self.start_rect.topleft
+        next_x = topleft[0] + randint(diff_left, diff_right)
+        next_y = topleft[1] + randint(diff_left, diff_right)
+        return next_x, next_y
+
+    def update(self):
+        self.step += 1
+        if self.step % 3 == 0:
+            dest = self.generate_random_next_coordinate()
+            self.game.camera_group.move_sprite_to(self.dice, *dest)
+            self.dice.set_random()
+
+    def is_finished(self):
+        if self.step >= 50:
+            self.game.camera_group.move_sprite_to(self.dice, self.start_rect.x, self.start_rect.y)
+            return True
+        return False
+
 class Holder(pygame.sprite.Sprite, BoardObject):
     """Represents an image deck in the game."""
     def __init__(self, x, y, width, height, group, game):
@@ -226,7 +320,6 @@ class Holder(pygame.sprite.Sprite, BoardObject):
         self.rect = pygame.rect.Rect(x, y, width, height)
         self.z_index = 0
         self._type = "holder"
-        self.draggable = False
         self.deck = []
         self.render = True
         self.last_focused = True
@@ -324,7 +417,6 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.game = game
         self.group = group
         self._type = "player_hand"
-        self.draggable = False
         self.deck = []
         self.render = True
         self.hovering_image_middle_x = 0
@@ -436,7 +528,6 @@ class Button(pygame.sprite.Sprite, BoardObject):
         self.game = game
         self.group = group
         self._type = "button"
-        self.draggable = False
         self.render = True
         self.text = text
         self.rect = pygame.rect.Rect(x, y, width, height)
@@ -552,6 +643,14 @@ class CameraGroup(pygame.sprite.Group):
                     pos_x -= sprite.rect.height
                 self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
 
+        # Debugging
+        center = self.apply_zoom(0, 0)
+        pygame.draw.circle(self.display_surface, 'red', center, 10)
+        mouse_pos = self.reverse_zoom(*pygame.mouse.get_pos())
+        font = pygame.font.SysFont(None, 24)
+        text_surface = font.render(f'{mouse_pos}', True, 'black')
+        self.display_surface.blit(text_surface, (10, 10))
+
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
         order_priority = {
@@ -660,41 +759,18 @@ class Game:
         self.mp = {}
 
 
-        #def assign_id(obj):
-        #    if len(self.mp) == 0:
-        #        iota = 0
-        #    else:
-        #        iota = max(self.mp.keys()) + 1
-        #    obj._id = iota
-        #    self.mp[obj._id] = obj
-        #images = []
-        #for i in range(1, 49):
-        #    front_path = f"assets/kingdomino/front_{i}.png"
-        #    back_path = f"assets/kingdomino/back_{i}.png"
-        #    width = int(390 *  0.7)
-        #    height = int(192 * 0.7)
-        #    image = Image(front_path, 0, 0, width, height, self.camera_group, self, flipable=True, back_path=back_path)
-        #    images.append(image)
-        #    assign_id(image)
-        #holder = Holder(0, 0, int(390 * 0.75), int(192 * 0.8), self.camera_group, self)
-        #assign_id(holder)
-        #for image in images:
-        #    holder.add_image(image)
-
-        ## Stuff
-        #button_width, button_height = 140, 40
-        #button_y = (253 / 2 - button_height / 2)
-        #button_x = (-150)
-        #shuffle_button = ShuffleButton(self.camera_group, self, button_x, button_y, button_width, button_height, holder, 25)
-        #assign_id(shuffle_button)
-        #retrieve_button = RetrieveButton(self.camera_group, self,  button_x, button_y - 50, button_width, button_height, holder, list(holder.deck), 25)
-        #assign_id(retrieve_button)
+        def assign_id(obj):
+            if len(self.mp) == 0:
+                iota = 0
+            else:
+                iota = max(self.mp.keys()) + 1
+            obj._id = iota
+            self.mp[obj._id] = obj
+        GameState.load_game_state(self, path="game_state.zip")
 
         # self.player_hand = PlayerHand(self.camera_group, self)
         # self.player_hand._id = "player_hand"
         # self.assign_z_index(self.player_hand)
-        GameState.load_game_state(self, path="kingdomino.zip")
-        #GameState.save_game_state(self, output_zip_path="kingdomino.zip")
         # self.save_game_state()
         self.network_mg.set_networking(True)
 
@@ -738,10 +814,14 @@ class Game:
             self.running = False
         elif event.key in [pygame.K_q, pygame.K_e]:
             self.process_rotation_clicked(event)
+        elif event.key in [pygame.K_z, pygame.K_x]:
+            self.process_board_rotation(event)
         elif event.key in [pygame.K_c]:
             self.camera_group.center()
         elif event.key in [pygame.K_j, pygame.K_i, pygame.K_k, pygame.K_l]:
             self.move_last_held_object(False)
+        elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL):
+            GameState.save_game_state(self, output_zip_path="game_state.zip")
 
     def move_last_held_object(self, count=True):
         if count:
@@ -762,18 +842,21 @@ class Game:
             return
         self.camera_group.move_sprite_abs(self.last_held_object, (dx, dy))
 
+    def process_board_rotation(self, event):
+        direction = 1 if event.key == pygame.K_z else -1
+        self.camera_group.rotation = (self.camera_group.rotation + direction * ROTATION_STEP) % 360
+
     def process_rotation_clicked(self, event):
-        direction = 1 if event.key == pygame.K_q else -1
-        if pygame.key.get_mods() & pygame.KMOD_SHIFT:
-            self.camera_group.rotation = (self.camera_group.rotation + direction * ROTATION_STEP) % 360
-            return
+        direction = 1 if event.key == pygame.K_z else -1
         if self.held_object is not None:
-            self.held_object.rotate(direction)
+            if self.can_rotate(self.held_object):
+                self.held_object.rotate(direction)
             return
         mouse_pos = pygame.mouse.get_pos()
         for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
             if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
-                obj.rotate(direction)
+                if self.can_rotate(obj):
+                    obj.rotate(direction)
                 break
 
     def mouse_motion(self, event):
@@ -806,7 +889,7 @@ class Game:
             if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
                 self.is_holding_object = True
                 self.held_object = obj
-                if obj.draggable:
+                if self.can_drag(obj):
                     self.assign_inf_z_index(obj)
                 break
 
@@ -837,7 +920,7 @@ class Game:
 
     def move_held_object(self, event):
         self.held_object = self.held_object.holding()
-        if self.held_object.draggable:
+        if self.can_drag(self.held_object):
             self.moved_holding_object = True
             self.camera_group.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
             self.assign_inf_z_index(self.held_object)
@@ -861,18 +944,23 @@ class Game:
         for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
             if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
                 obj.clicked()
-                self.assign_z_index(obj)
+                if obj.draggable:
+                    self.assign_z_index(obj)
                 return True
         return False
 
     def handle_ongoing(self):
         for event in self.ongoing[:]:
-            event.update(self)
+            event.update()
             if event.is_finished():
                 self.ongoing.remove(event)
 
     def add_ongoing(self, ongoing_event):
         self.ongoing.append(ongoing_event)
+
+    def initialize_z_index(self):
+        for obj in self.mp.keys():
+            self.z_index_iota = max(self.z_index_iota, self.mp[obj].z_index + 1)
 
     def assign_z_index(self, obj):
         """
@@ -896,6 +984,12 @@ class Game:
         """
         if obj is not None:
             obj.z_index = float('inf')
+
+    def can_drag(self, obj):
+        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or obj.draggable
+
+    def can_rotate(self, obj):
+        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or obj.rotatable
 
     def handle_zoom(self, event):
         next_zoom_index = self.zoom_index + event.y
@@ -932,7 +1026,11 @@ class GameState:
                     "front_path": sprite.front_image_path,
                     "z_index": sprite.z_index,
                     "render": sprite.render,
-                    "flipable": sprite.flipable
+                    "flipable": sprite.flipable,
+                    "draggable": sprite.draggable,
+                    "rotatable": sprite.rotatable,
+                    "rotation": sprite.rotation,
+                    "is_front": sprite.is_front,
                 })
                 if sprite.flipable:
                     game_state[-1]["back_path"] = sprite.back_image_path
@@ -967,6 +1065,23 @@ class GameState:
                 elif sprite._type == "shuffle_button":
                     arr["holder"] = sprite.holder._id
                 game_state.append(arr)
+        for sprite in game.camera_group.sprites():
+            if sprite._type == "dice":
+                game_state.append({
+                    "type": "dice",
+                    "id": sprite._id,
+                    "x": sprite.original_rect.x,
+                    "y": sprite.original_rect.y,
+                    "width": sprite.original_rect.width,
+                    "height": sprite.original_rect.height,
+                    "z_index": sprite.z_index,
+                    "paths": sprite.paths,
+                    "draggable": sprite.draggable,
+                    "rotatable": sprite.rotatable,
+                    "rotation": sprite.rotation,
+                })
+                for p in sprite.paths:
+                    zipf.write(p, p)
         zipf.writestr("game_state.json", json.dumps(game_state, indent=2))
 
     def load_game_state(game, path="game_state.zip"):
@@ -983,7 +1098,12 @@ class GameState:
                 image.z_index = sprite["z_index"]
                 image.render = sprite["render"]
                 image._id = sprite["id"]
+                image.draggable = sprite["draggable"]
+                image.rotatable = sprite["rotatable"]
+                image.rotation = sprite["rotation"]
+                image.is_front = sprite["is_front"]
                 game.mp[image._id] = image
+                image.update()
         for sprite in game_state:
             if sprite["type"] == "holder":
                 holder = Holder(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
@@ -1004,6 +1124,16 @@ class GameState:
                 button = RetrieveButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]], images_to_retrieve)
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
+            elif sprite["type"] == "dice":
+                dice = Dice(sprite["paths"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                dice.z_index = sprite["z_index"]
+                dice._id = sprite["id"]
+                dice.draggable = sprite["draggable"]
+                dice.rotatable = sprite["rotatable"]
+                dice.rotation = sprite["rotation"]
+                game.mp[dice._id] = dice
+                dice.update()
+        game.initialize_z_index()
 
 class NetworkManager:
 
