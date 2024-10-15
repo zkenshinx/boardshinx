@@ -18,6 +18,8 @@ class BoardObject:
         self.is_focused = False
         self.draggable = False
         self.clickable = True
+        self.rotatable = False
+        self.z_index = 0
 
     def update(self):
         pass
@@ -49,6 +51,8 @@ class BoardObject:
         pass
 
 class Image(pygame.sprite.Sprite, BoardObject):
+
+    image_cache = dict()
 
     """Represents an image in the game."""
     def __init__(self, front_path, x, y, width, height, group, game, flipable=False, draggable=True, rotatable=True, back_path=None):
@@ -99,20 +103,22 @@ class Image(pygame.sprite.Sprite, BoardObject):
         self.flip()
 
     def holding(self):
-        if hasattr(self.game, "player_hand") and self in self.game.player_hand.deck:
-            self.game.player_hand.remove_image(self)
+        for hand in self.game.get_hands():
+            if self in hand:
+                hand.remove_image(self)
+                return
+
         for holder in self.game.get_holders():
             holder.mark_focused(self.group.colliderect(self.rect, holder.rect))
-        if hasattr(self.game, "player_hand"):
-            self.game.player_hand.check_collide_with_hand(self)
+
+        for hand in self.game.get_hands():
+            hand.mark_focused(self.group.colliderect(self.rect, hand.rect))
         return self
 
     def release(self):
         if self._try_add_image_to_deck():
             return
-
-        if hasattr(self.game, "player_hand") and self.game.player_hand.check_collide_with_hand(self):
-            self.game.player_hand.add_image(self)
+        self._try_add_image_to_hand()
 
     def _try_add_image_to_deck(self):
         for holder in self.game.get_holders():
@@ -120,6 +126,11 @@ class Image(pygame.sprite.Sprite, BoardObject):
                 holder.add_image(self)
                 return True
         return False
+
+    def _try_add_image_to_hand(self):
+        for hand in self.game.get_hands():
+            if self.group.colliderect(self.rect, hand.rect):
+                hand.add_image(self)
 
     def flip(self):
         if not self.flipable:
@@ -142,6 +153,9 @@ class Image(pygame.sprite.Sprite, BoardObject):
     def reset_rotation(self):
         while self.rotation != 0:
             self.rotate(1, False)
+
+    def __repr__(self):
+        return f"Image: {self.front_image_path}"
 
 class Dice(pygame.sprite.Sprite, BoardObject):
 
@@ -482,7 +496,7 @@ class Holder(pygame.sprite.Sprite, BoardObject):
             if send_message:
                 self.game.network_mg.add_image_to_holder_send(self, image)
             self.mark_focused(False)
-            image.reset_rotation()
+            # image.reset_rotation()
             image.render = False
             self.deck.append(image)
             self.create_display()
@@ -515,6 +529,8 @@ class Holder(pygame.sprite.Sprite, BoardObject):
         self.flip_top()
 
     def holding(self):
+        if pygame.key.get_mods() & pygame.KMOD_CTRL:
+            return self
         return self.pop_image()
 
     def flip_top(self):
@@ -538,28 +554,22 @@ class Holder(pygame.sprite.Sprite, BoardObject):
         self.create_display()
 
 class PlayerHand(pygame.sprite.Sprite, BoardObject):
-    def __init__(self, group, game):
+    def __init__(self, x, y, width, height, group, game):
         super().__init__(group)
         BoardObject.__init__(self)
-        self.static_rendering = True
+        self.original_rect = pygame.rect.Rect(x, y, width, height)
+        self.rect = pygame.rect.Rect(x, y, width, height)
+        self.static_rendering = False
         self.game = game
         self.group = group
         self._type = "player_hand"
         self.deck = []
         self.render = True
-        self.hovering_image_middle_x = 0
-        self.hovering_image_index = 0
+        self.insert_image_index = 0
+        self.margin = 10
         self.create_display()
 
     def create_display(self):
-        window_width, window_height = self.group.display_surface.get_size()
-        width = window_width * 0.8
-        height = 250 * self.group.zoom_scale
-        x = (window_width - width) / 2
-        y = window_height - height
-        self.rect = pygame.rect.Rect(x, y, width, height)
-        self.original_rect = pygame.rect.Rect(x, y, width, height)
-        
         border_thickness = int((self.rect.height + 99) / 100)
         surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         
@@ -569,42 +579,56 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
                          (0, 0, surface.get_width(), surface.get_height()),
                          width=border_thickness)
 
-        self.game.assign_z_index(self)
-        margin = 10
+        self.insert_image_index = 0
+        deck_len = len(self.deck)
+        if deck_len == 0:
+            return surface
+
+        image = self.deck[0]
+        image_width = image.rect.width
+        image_height = image.rect.height
+        image_original_width = image.original_rect.width
+        image_original_height = image.original_rect.height
         # Needed to determine where hovering image goes
-        self.hovering_image_index = 0
-        closest_dist = float('inf')
+        if self.is_focused:
+            closest_dist = float('inf')
 
-        for i in range(len(self.deck)):
+            start_x = (self.original_rect.width - (self.margin * deck_len + image_original_width * (deck_len + 1)) ) / 2
+            start_y = (self.original_rect.height - image_original_height) / 2
+            for i in range(deck_len + 1):
+                x = start_x + i * self.margin + i * image_original_width
+                y = start_y
+                center_x = self.original_rect.x + (x + image_original_width / 2)
+                center_y = self.original_rect.y + (y + image_original_height / 2)
+
+                mouse_x, mouse_y = self.group.mouse_pos()
+                dist = math.hypot(center_x - mouse_x, center_y - mouse_y)
+                if dist < closest_dist:
+                    closest_dist = dist
+                    self.insert_image_index = i
+
+            start_x = (self.rect.width - (self.margin * deck_len + image.rect.width * (deck_len + 1)) ) / 2
+            start_y = (self.rect.height - image.rect.height) / 2
+            for i in range(deck_len + 1):
+                x = start_x + i * self.margin + i * image_width
+                y = start_y
+                if i == self.insert_image_index:
+                    gray_overlay = pygame.Surface((image_width, image_height), pygame.SRCALPHA)
+                    gray_overlay.fill((80, 80, 80, 99))
+                    surface.blit(gray_overlay, (x, y))
+                    continue
+                j = i if i < self.insert_image_index else i - 1
+                image = self.deck[j]
+                surface.blit(image.display, (x, y))
+            return surface
+
+        start_x = (self.rect.width - (self.margin * (deck_len - 1) + image.rect.width * deck_len) ) / 2
+        start_y = (self.rect.height - image.rect.height) / 2
+        for i in range(deck_len):
             image = self.deck[i]
-            start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
-            start_y = (y - self.group.zoom_scale * self.group.offset_y) / self.group.zoom_scale
-            image.rect.x = start_x + (i + 1) * margin + i * image.rect.width / self.group.zoom_scale
-            image.rect.y = start_y + 7
-            image.original_rect.x = image.rect.x
-            image.original_rect.y = image.rect.y
-            self.game.assign_z_index(image)
-
-            dist = abs(self.hovering_image_middle_x - image.rect.centerx)
-            if dist < closest_dist:
-                closest_dist = dist
-                self.hovering_image_index = i
-
-        if self.is_focused and self.hovering_image_index is not None:
-            if len(self.deck) > 0 and closest_dist > self.deck[0].rect.width // 2:
-                self.hovering_image_index = len(self.deck)
-            for i in range(self.hovering_image_index, len(self.deck)):
-                image = self.deck[i]
-                start_x = (x - self.group.zoom_scale * self.group.offset_x) / self.group.zoom_scale
-                start_y = (y - self.group.zoom_scale * self.group.offset_y) / self.group.zoom_scale
-                image.rect.x = start_x + (i + 2) * margin + (i + 1) * image.rect.width / self.group.zoom_scale
-                image.rect.y = start_y + 7
-                image.original_rect.x = image.rect.x
-                image.original_rect.y = image.rect.y
-
-            gray_overlay = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
-            gray_overlay.fill((80, 80, 80, 99))
-            surface.blit(gray_overlay, (0, 0))
+            x = start_x + i * self.margin + i * image_width
+            y = start_y
+            surface.blit(image.display, (x, y))
         
         return surface
 
@@ -615,18 +639,37 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
     def add_image(self, image):
         if image not in self.deck:
             self.game.network_mg.add_image_to_hand_send(image)
+            image.render = False
             self.mark_focused(False)
-            if not image.is_front:
-                image.flip()
-            image.reset_rotation()
-            self.deck.insert(self.hovering_image_index, image)
+            #if not image.is_front:
+            #    image.flip()
+            self.deck.insert(self.insert_image_index, image)
 
     def remove_image(self, image):
         if image in self.deck:
             self.game.network_mg.remove_image_from_hand_send(image)
+            image.render = True
             if image.is_front:
                 image.flip()
             self.deck.remove(image)
+
+    def holding(self):
+        deck_len = len(self.deck)
+        if deck_len > 0:
+            image = self.deck[0]
+            image_original_width = image.original_rect.width
+            image_original_height = image.original_rect.height
+            start_x = (self.original_rect.width - (self.margin * (deck_len - 1) + image_original_width * deck_len) ) / 2
+            start_y = (self.original_rect.height - image_original_height) / 2
+            for i in range(deck_len):
+                x = self.original_rect.x + start_x + i * self.margin + i * image_original_width
+                y = self.original_rect.y + start_y
+                rect = pygame.rect.Rect(x, y, image_original_width, image_original_height)
+                if rect.collidepoint(self.group.mouse_pos()):
+                    image = self.deck[i]
+                    self.remove_image(self.deck[i])
+                    return image
+        return self
 
     def hovering(self):
         pass
@@ -638,16 +681,8 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         if self.is_focused != is_focused:
             self.is_focused = is_focused
 
-    def check_collide_with_hand(self, image):
-        image_rect = image.rect.copy()
-        image_rect.topleft = self.group.apply_zoom(*image_rect.topleft)
-        if image_rect.colliderect(self.rect):
-            self.hovering_image_middle_x = image_rect.centerx
-            self.mark_focused(True)
-            return True
-        else:
-            self.mark_focused(False)
-            return False
+    def __contains__(self, item):
+        return item in self.deck
 
 class Button(pygame.sprite.Sprite, BoardObject):
     def __init__(self, group, game, text, x, y, width, height, font_size=25):
@@ -688,7 +723,6 @@ class Button(pygame.sprite.Sprite, BoardObject):
             surface.blit(gray_overlay, (0, 0))
         
         self.display = surface
-        self.game.assign_z_index(self)
 
     def clicked(self):
         pass
@@ -834,8 +868,8 @@ class CameraGroup(pygame.sprite.Group):
             return rect_copy
         return normalize(rect1).colliderect(normalize(rect2))
 
-    def collidepoint(self, rect, mouse_pos):
-        return rect.collidepoint(self.reverse_rotation(*self.reverse_zoom(*mouse_pos)))
+    def collidepoint(self, rect, point_pos):
+        return rect.collidepoint(self.reverse_rotation(*self.reverse_zoom(*point_pos)))
 
     def mouse_pos(self):
         return self.reverse_rotation(*self.reverse_zoom(*pygame.mouse.get_pos()))
@@ -906,10 +940,6 @@ class Game:
             self.mp[obj._id] = obj
         GameState.load_game_state(self, path="game_state.zip")
 
-        # self.player_hand = PlayerHand(self.camera_group, self)
-        # self.player_hand._id = "player_hand"
-        # self.assign_z_index(self.player_hand)
-        # self.save_game_state()
         self.selection = Selection(self.camera_group, self)
         assign_id(self.selection)
         self.assign_inf_z_index(self.selection)
@@ -1014,7 +1044,7 @@ class Game:
                 self.held_object.rotate(direction)
             return
         mouse_pos = pygame.mouse.get_pos()
-        for obj in sorted([s for s in self.camera_group.sprites() if s.render], key= lambda x : -x.z_index):
+        for obj in sorted(self.get_rendered_objects(), key= lambda x : -x.z_index):
             if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
                 if self.can_rotate(obj):
                     obj.rotate(direction)
@@ -1088,7 +1118,7 @@ class Game:
 
     def move_held_object(self, event):
         self.held_object = self.held_object.holding()
-        if self.can_drag(self.held_object):
+        if self.held_object is not None and self.can_drag(self.held_object):
             self.moved_holding_object = True
             self.camera_group.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
             self.assign_z_index(self.held_object)
@@ -1157,10 +1187,10 @@ class Game:
             obj.z_index = float('inf')
 
     def can_drag(self, obj):
-        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or obj.draggable
+        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.draggable)
 
     def can_rotate(self, obj):
-        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or obj.rotatable
+        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.rotatable)
 
     def handle_zoom(self, event):
         next_zoom_index = self.zoom_index + event.y
@@ -1168,8 +1198,14 @@ class Game:
             self.zoom_index = next_zoom_index
             self.camera_group.zoom(self.zooms[self.zoom_index])
 
+    def get_x(self, _type):
+        return [item for item in self.camera_group.sprites() if item._type == _type]
+
+    def get_hands(self):
+        return self.get_x("player_hand")
+
     def get_holders(self):
-        return [item for item in self.camera_group.sprites() if item._type == "holder"]
+        return self.get_x("holder")
 
     def get_rendered_objects(self):
         return [s for s in self.camera_group.sprites() if s.render]
@@ -1218,6 +1254,15 @@ class GameState:
                     "height": sprite.original_rect.height,
                     "z_index": sprite.z_index,
                     "deck": [f._id for f in sprite.deck]
+                })
+            elif sprite._type == "player_hand":
+                game_state.append({
+                    "type": "player_hand",
+                    "id": sprite._id,
+                    "x": sprite.original_rect.x,
+                    "y": sprite.original_rect.y,
+                    "width": sprite.original_rect.width,
+                    "height": sprite.original_rect.height
                 })
         for sprite in game.camera_group.sprites():
             if "button" in sprite._type:
@@ -1283,6 +1328,10 @@ class GameState:
                 for image_id in sprite["deck"]:
                     holder.add_image(game.mp[image_id])
                 game.mp[holder._id] = holder
+            elif sprite["type"] == "player_hand":
+                hand = PlayerHand(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                hand._id = sprite["id"]
+                game.mp[hand._id] = hand
         for sprite in game_state:
             if sprite["type"] == "shuffle_button":
                 button = ShuffleButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]])
