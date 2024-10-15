@@ -10,6 +10,7 @@ from functools import lru_cache
 import random
 
 ROTATION_STEP = 90
+ROTATION_STEP_MOD = 360
 
 class BoardObject:
 
@@ -20,6 +21,7 @@ class BoardObject:
         self.clickable = True
         self.rotatable = False
         self.z_index = 0
+        self.rotation = 0
 
     def update(self):
         pass
@@ -45,9 +47,6 @@ class BoardObject:
             self.create_display()
 
     def release(self):
-        pass
-
-    def rotate(self, direction):
         pass
 
 class Image(pygame.sprite.Sprite, BoardObject):
@@ -87,8 +86,7 @@ class Image(pygame.sprite.Sprite, BoardObject):
     @lru_cache(maxsize=4096)
     def create_display(image_path, width, height, rotation):
         image = pygame.image.load(image_path).convert_alpha()
-        rotated_image = pygame.transform.rotate(image, rotation)
-        scaled_image = pygame.transform.smoothscale(rotated_image, (width, height))
+        scaled_image = pygame.transform.smoothscale(image, (width, height))
         return scaled_image
 
     def update_zoom(self):
@@ -103,16 +101,16 @@ class Image(pygame.sprite.Sprite, BoardObject):
         self.flip()
 
     def holding(self):
-        for hand in self.game.get_hands():
+        for hand in self.game.GIP.get_hands():
             if self in hand:
                 hand.remove_image(self)
                 return
 
-        for holder in self.game.get_holders():
-            holder.mark_focused(self.group.colliderect(self.rect, holder.rect))
+        for holder in self.game.GIP.get_holders():
+            holder.mark_focused(self.group.colliderect(self.original_rect, holder.original_rect))
 
-        for hand in self.game.get_hands():
-            hand.mark_focused(self.group.colliderect(self.rect, hand.rect))
+        for hand in self.game.GIP.get_hands():
+            hand.mark_focused(self.group.colliderect(self.original_rect, hand.original_rect))
         return self
 
     def release(self):
@@ -121,15 +119,15 @@ class Image(pygame.sprite.Sprite, BoardObject):
         self._try_add_image_to_hand()
 
     def _try_add_image_to_deck(self):
-        for holder in self.game.get_holders():
-            if self.group.colliderect(self.rect, holder.rect):
+        for holder in self.game.GIP.get_holders():
+            if self.group.colliderect(self.original_rect, holder.original_rect):
                 holder.add_image(self)
                 return True
         return False
 
     def _try_add_image_to_hand(self):
-        for hand in self.game.get_hands():
-            if self.group.colliderect(self.rect, hand.rect):
+        for hand in self.game.GIP.get_hands():
+            if self.group.colliderect(self.original_rect, hand.original_rect):
                 hand.add_image(self)
 
     def flip(self):
@@ -141,18 +139,6 @@ class Image(pygame.sprite.Sprite, BoardObject):
 
     def mark_focused(self, is_focused):
         pass
-
-    def rotate(self, direction, send_message=True):
-        if send_message:
-            self.game.network_mg.rotate_object_send(self, direction)
-        self.rotation = (self.rotation + ROTATION_STEP * direction) % 360
-        self.rect.width, self.rect.height = self.rect.height, self.rect.width
-        self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
-        self.update()
-
-    def reset_rotation(self):
-        while self.rotation != 0:
-            self.rotate(1, False)
 
     def __repr__(self):
         return f"Image: {self.front_image_path}"
@@ -186,8 +172,7 @@ class Dice(pygame.sprite.Sprite, BoardObject):
     @lru_cache(maxsize=4096)
     def create_display(image_path, width, height, rotation):
         image = pygame.image.load(image_path).convert_alpha()
-        rotated_image = pygame.transform.rotate(image, rotation)
-        scaled_image = pygame.transform.smoothscale(rotated_image, (width, height))
+        scaled_image = pygame.transform.smoothscale(image, (width, height))
         return scaled_image
 
     def update_zoom(self):
@@ -206,18 +191,6 @@ class Dice(pygame.sprite.Sprite, BoardObject):
 
     def mark_focused(self, is_focused):
         pass
-
-    def rotate(self, direction, send_message=True):
-        if send_message:
-            self.game.network_mg.rotate_object_send(self, direction)
-        self.rotation = (self.rotation + ROTATION_STEP * direction) % 360
-        self.rect.width, self.rect.height = self.rect.height, self.rect.width
-        self.original_rect.width, self.original_rect.height = self.original_rect.height, self.original_rect.width
-        self.update()
-
-    def reset_rotation(self):
-        while self.rotation != 0:
-            self.rotate(1, False)
 
 class Selection(pygame.sprite.Sprite, BoardObject):
 
@@ -324,7 +297,7 @@ class Selection(pygame.sprite.Sprite, BoardObject):
     def finish_selection(self):
         self.phase = Selection.PHASE_SELECTED
         self.selected_objects.clear()
-        for sprite in self.game.get_rendered_objects():
+        for sprite in self.game.GIP.get_rendered_objects():
             if sprite == self or not sprite.draggable:
                 continue
             elif self.game.camera_group.colliderect(self.rect, sprite.rect):
@@ -496,7 +469,6 @@ class Holder(pygame.sprite.Sprite, BoardObject):
             if send_message:
                 self.game.network_mg.add_image_to_holder_send(self, image)
             self.mark_focused(False)
-            # image.reset_rotation()
             image.render = False
             self.deck.append(image)
             self.create_display()
@@ -778,32 +750,28 @@ class CameraGroup(pygame.sprite.Group):
         super().__init__()
         self.display_surface = pygame.display.get_surface()
         self.zoom_scale = 1
-        self.rotation = 0
+        self.global_rotation = 0
         self.center()
 
     def custom_draw(self):
         self.display_surface.fill('#E1E1E1')
 
-        screen_rect = self.display_surface.get_rect()
-        screen_rect.x = (screen_rect.x - self.offset_x)
-        screen_rect.y = (screen_rect.y - self.offset_y)
-        screen_rect.width  /= self.zoom_scale
-        screen_rect.height /= self.zoom_scale
         for sprite in sorted([s for s in self.sprites() if s.render], key= lambda x : x.z_index):
             if sprite.static_rendering:
                 self.display_surface.blit(sprite.display, sprite.rect.topleft)
                 continue
-            if True or self.colliderect(screen_rect, sprite.rect):
-                pos_x, pos_y = self.apply_zoom(*self.apply_rotation(*sprite.rect.topleft))
-                rotated_sprite = pygame.transform.rotate(sprite.display, self.rotation)
-                if self.rotation == 90:
-                    pos_y -= sprite.rect.width
-                elif self.rotation == 180:
-                    pos_x -= sprite.rect.width
-                    pos_y -= sprite.rect.height
-                elif self.rotation == 270:
-                    pos_x -= sprite.rect.height
-                self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
+            # Sprite might be inner rotated
+            pos_x, pos_y = self.apply_zoom(*self.apply_rotation(*sprite.rect.topleft))
+            rotation = self.global_rotation + sprite.rotation
+            rotated_sprite = pygame.transform.rotate(sprite.display, self.global_rotation + sprite.rotation)
+            if self.global_rotation == 90:
+                pos_y -= sprite.rect.width
+            elif self.global_rotation == 180:
+                pos_x -= sprite.rect.width
+                pos_y -= sprite.rect.height
+            elif self.global_rotation == 270:
+                pos_x -= sprite.rect.height
+            self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
 
         # Debugging
         center = self.apply_zoom(0, 0)
@@ -885,13 +853,13 @@ class CameraGroup(pygame.sprite.Group):
         return reversed_x, reversed_y
 
     def apply_rotation(self, x, y):
-        radians = math.radians(-self.rotation)
+        radians = math.radians(-self.global_rotation)
         rotated_x = x * math.cos(radians) - y * math.sin(radians)
         rotated_y = x * math.sin(radians) + y * math.cos(radians)
         return rotated_x, rotated_y
 
     def reverse_rotation(self, x, y):
-        radians = math.radians(self.rotation)
+        radians = math.radians(self.global_rotation)
         reversed_x = x * math.cos(radians) - y * math.sin(radians)
         reversed_y = x * math.sin(radians) + y * math.cos(radians)
         return reversed_x, reversed_y
@@ -929,6 +897,8 @@ class Game:
         self.selection_present = False
 
         self.mp = {}
+        self.GIP = GameInfoProvider(self, self.camera_group)
+        self.GOM = GameObjectManipulator(self, self.camera_group, self.GIP)
 
 
         def assign_id(obj):
@@ -1035,19 +1005,17 @@ class Game:
 
     def process_board_rotation(self, event):
         direction = 1 if event.key == pygame.K_z else -1
-        self.camera_group.rotation = (self.camera_group.rotation + direction * ROTATION_STEP) % 360
+        self.camera_group.global_rotation = (self.camera_group.global_rotation + direction * ROTATION_STEP) % ROTATION_STEP_MOD
 
     def process_rotation_clicked(self, event):
         direction = 1 if event.key == pygame.K_z else -1
         if self.held_object is not None:
-            if self.can_rotate(self.held_object):
-                self.held_object.rotate(direction)
+            self.GOM.try_rotate_obj(direction, self.held_object)
             return
         mouse_pos = pygame.mouse.get_pos()
-        for obj in sorted(self.get_rendered_objects(), key= lambda x : -x.z_index):
+        for obj in sorted(self.GIP.get_rendered_objects(), key= lambda x : -x.z_index):
             if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
-                if self.can_rotate(obj):
-                    obj.rotate(direction)
+                self.GOM.try_rotate_obj(direction, obj)
                 break
 
     def mouse_motion(self, event):
@@ -1064,7 +1032,7 @@ class Game:
         self.camera_group.move_camera(event.rel)
 
     def process_mouse_hovering(self, mouse_pos):
-        for sprite in self.get_rendered_objects():
+        for sprite in self.GIP.get_rendered_objects():
             if self.camera_group.collidepoint(sprite.original_rect, mouse_pos):
                 sprite.hovering()
             else:
@@ -1077,7 +1045,7 @@ class Game:
         elif event.button != 1:
             return
 
-        for obj in sorted(self.get_rendered_objects(), key= lambda x : -x.z_index):
+        for obj in sorted(self.GIP.get_rendered_objects(), key= lambda x : -x.z_index):
             if self.camera_group.collidepoint(obj.original_rect, event.pos):
                 self.is_holding_object = True
 
@@ -1086,7 +1054,7 @@ class Game:
                     return
 
                 self.held_object = obj
-                if self.can_drag(obj):
+                if self.GIP.can_drag(obj):
                     self.assign_z_index(obj)
                 return
         self.selection.reset()
@@ -1118,7 +1086,7 @@ class Game:
 
     def move_held_object(self, event):
         self.held_object = self.held_object.holding()
-        if self.held_object is not None and self.can_drag(self.held_object):
+        if self.held_object is not None and self.GIP.can_drag(self.held_object):
             self.moved_holding_object = True
             self.camera_group.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
             self.assign_z_index(self.held_object)
@@ -1186,39 +1154,55 @@ class Game:
         if obj is not None:
             obj.z_index = float('inf')
 
-    def can_drag(self, obj):
-        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.draggable)
-
-    def can_rotate(self, obj):
-        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.rotatable)
-
     def handle_zoom(self, event):
         next_zoom_index = self.zoom_index + event.y
         if 0 <= next_zoom_index < len(self.zooms):
             self.zoom_index = next_zoom_index
             self.camera_group.zoom(self.zooms[self.zoom_index])
 
-    def get_x(self, _type):
-        return [item for item in self.camera_group.sprites() if item._type == _type]
-
-    def get_hands(self):
-        return self.get_x("player_hand")
-
-    def get_holders(self):
-        return self.get_x("holder")
-
-    def get_rendered_objects(self):
-        return [s for s in self.camera_group.sprites() if s.render]
-
     def quit(self):
         """Quit the game and clean up resources."""
         pygame.quit()
 
+class GameObjectManipulator:
+
+    def __init__(self, game, group, game_info_provider):
+        self.game = game
+        self.camera_group = group
+        self.GIP = game_info_provider
+
+    def try_rotate_obj(self, direction, obj):
+        if self.GIP.can_rotate(obj):
+            obj.rotation = (obj.rotation + ROTATION_STEP * direction) % ROTATION_STEP_MOD
+            obj.original_rect.width, obj.original_rect.height = obj.original_rect.height, obj.original_rect.width
+
+class GameInfoProvider:
+    def __init__(self, game, group):
+        self.game = game
+        self.camera_group = group
+
+    def can_rotate(self, obj):
+        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.rotatable)
+
+    def can_drag(self, obj):
+        return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.draggable)
+
+    def get_sprites_of_type(self, _type):
+        return [item for item in self.camera_group.sprites() if item._type == _type]
+
+    def get_hands(self):
+        return self.get_sprites_of_type("player_hand")
+
+    def get_holders(self):
+        return self.get_sprites_of_type("holder")
+
+    def get_rendered_objects(self):
+        return [s for s in self.camera_group.sprites() if s.render]
 
 class GameState:
 
     @staticmethod
-    def save_game_state(game, output_zip_path="game_state"):
+    def save_game_state(game, output_zip_path="game_state.zip"):
         zipf = zipfile.ZipFile(output_zip_path, "w")
         game_state = []
         for sprite in game.camera_group.sprites():
@@ -1300,8 +1284,9 @@ class GameState:
                     zipf.write(p, p)
         zipf.writestr("game_state.json", json.dumps(game_state, indent=2))
 
-    def load_game_state(game, path="game_state.zip"):
-        zipf = zipfile.ZipFile(path, "r")
+    @staticmethod
+    def load_game_state(game, input_zip_path="game_state.zip"):
+        zipf = zipfile.ZipFile(input_zip_path, "r")
         zipf.extractall()
         with open("game_state.json", 'r') as file:
             game_state = json.load(file)
@@ -1386,7 +1371,7 @@ class NetworkManager:
     def flip_image_received(self, message):
         image = self.game.mp[message["image_id"]]
         image.assign_front(message["is_front"])
-        for holder in self.game.get_holders():
+        for holder in self.game.GIP.get_holders():
             if image in holder.deck:
                 holder.create_display()
 
