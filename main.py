@@ -1,5 +1,5 @@
-from src import Game
+from src import game
 
 if __name__ == "__main__":
-    game = Game()
-    game.run()
+    g = game.Game()
+    g.run()
