@@ -11,6 +11,7 @@ import random
 
 ROTATION_STEP = 90
 ROTATION_STEP_MOD = 360
+PIXEL_PERFECT = 5
 
 class BoardObject:
 
@@ -24,9 +25,6 @@ class BoardObject:
         self.rotation = 0
 
     def update(self):
-        pass
-
-    def update_zoom(self):
         pass
 
     def clicked(self):
@@ -89,9 +87,6 @@ class Image(pygame.sprite.Sprite, BoardObject):
         scaled_image = pygame.transform.smoothscale(image, (width, height))
         return scaled_image
 
-    def update_zoom(self):
-        self.update()
-
     def assign_front(self, is_front):
         if self.flipable and self.is_front != is_front:
             self.is_front = is_front
@@ -107,10 +102,10 @@ class Image(pygame.sprite.Sprite, BoardObject):
                 return
 
         for holder in self.game.GIP.get_holders():
-            holder.mark_focused(self.group.colliderect(self.original_rect, holder.original_rect))
+            holder.mark_focused(self.game.collision_manager.colliderect(self.original_rect, holder.original_rect))
 
         for hand in self.game.GIP.get_hands():
-            hand.mark_focused(self.group.colliderect(self.original_rect, hand.original_rect))
+            hand.mark_focused(self.game.collision_manager.colliderect(self.original_rect, hand.original_rect))
         return self
 
     def release(self):
@@ -120,14 +115,14 @@ class Image(pygame.sprite.Sprite, BoardObject):
 
     def _try_add_image_to_deck(self):
         for holder in self.game.GIP.get_holders():
-            if self.group.colliderect(self.original_rect, holder.original_rect):
+            if self.game.collision_manager.colliderect(self.original_rect, holder.original_rect):
                 holder.add_image(self)
                 return True
         return False
 
     def _try_add_image_to_hand(self):
         for hand in self.game.GIP.get_hands():
-            if self.group.colliderect(self.original_rect, hand.original_rect):
+            if self.game.collision_manager.colliderect(self.original_rect, hand.original_rect):
                 hand.add_image(self)
 
     def flip(self):
@@ -175,9 +170,6 @@ class Dice(pygame.sprite.Sprite, BoardObject):
         scaled_image = pygame.transform.smoothscale(image, (width, height))
         return scaled_image
 
-    def update_zoom(self):
-        self.update()
-
     def clicked(self):
         self.roll()
 
@@ -221,7 +213,8 @@ class Selection(pygame.sprite.Sprite, BoardObject):
 
     def create_display(self):
         surface = None
-        scale = self.game.camera_group.zoom_scale
+        # TODO: why dice knows about zoom_scale?!?!?!
+        scale = self.game.camera.zoom_scale
         if self.phase == Selection.PHASE_SELECTING:
             width = abs(self.end_pos[0] - self.start_pos[0]) * scale
             height = abs(self.end_pos[1] - self.start_pos[1]) * scale
@@ -262,9 +255,9 @@ class Selection(pygame.sprite.Sprite, BoardObject):
 
     def holding(self):
         self.game.moved_holding_object = True
-        p = self.game.camera_group.mouse_pos()
+        p = self.game.camera.mouse_pos()
 
-        scale = self.game.camera_group.zoom_scale
+        scale = self.game.camera.zoom_scale
         min_x = min(sprite.rect.topleft[0] for sprite in self)
         min_y = min(sprite.rect.topleft[1] for sprite in self)
         max_x = max(sprite.rect.bottomright[0] for sprite in self)
@@ -278,18 +271,15 @@ class Selection(pygame.sprite.Sprite, BoardObject):
         for sprite in self:
             to_x = p[0] - center[0] + sprite.rect.center[0]
             to_y = p[1] - center[1] + sprite.rect.center[1]
-            self.game.camera_group.move_sprite_to_centered(sprite, to_x, to_y)
+            self.game.transform_manager.move_sprite_to_centered(sprite, to_x, to_y)
             self.game.assign_z_index(sprite)
         return self
-
-    def update_zoom(self):
-        pass
 
     def mark_focused(self, is_focused):
         pass
 
     def start_selection(self):
-        self.start_pos = self.game.camera_group.mouse_pos()
+        self.start_pos = self.game.camera.mouse_pos()
         self.end_pos = self.start_pos
         self.render = True
         self.phase = Selection.PHASE_SELECTING
@@ -300,7 +290,7 @@ class Selection(pygame.sprite.Sprite, BoardObject):
         for sprite in self.game.GIP.get_rendered_objects():
             if sprite == self or not sprite.draggable:
                 continue
-            elif self.game.camera_group.colliderect(self.rect, sprite.rect):
+            elif self.game.collision_manager.colliderect(self.rect, sprite.rect):
                 self.selected_objects.append(sprite)
         if len(self) == 0:
             self.reset()
@@ -339,7 +329,7 @@ class OngoingMove:
         else:
             t = self.current_count / self.count 
             pos = self.lerp(t)
-        self.game.camera_group.move_sprite_to(self.move_obj, pos.x, pos.y)
+        self.game.transform_manager.move_sprite_to(self.move_obj, pos.x, pos.y)
 
     def is_finished(self):
         if self.current_count >= self.count:
@@ -363,7 +353,7 @@ class OngoingShuffle:
             if top_image is None:
                 break
             next = self.generate_random_next_coordinate()
-            self.game.camera_group.move_sprite_to(top_image, *next)
+            self.game.transform_manager.move_sprite_to(top_image, *next)
             self.top_images.append(top_image)
             self.game.assign_z_index(top_image)
 
@@ -415,12 +405,12 @@ class OngoingRoll:
         self.step += 1
         if self.step % 3 == 0:
             dest = self.generate_random_next_coordinate()
-            self.game.camera_group.move_sprite_to(self.dice, *dest)
+            self.game.transform_manager.move_sprite_to(self.dice, *dest)
             self.dice.set_random()
 
     def is_finished(self):
         if self.step >= 50:
-            self.game.camera_group.move_sprite_to(self.dice, self.start_rect.x, self.start_rect.y)
+            self.game.transform_manager.move_sprite_to(self.dice, self.start_rect.x, self.start_rect.y)
             return True
         return False
 
@@ -522,7 +512,7 @@ class Holder(pygame.sprite.Sprite, BoardObject):
                 image.flip()
         self.create_display()
 
-    def update_zoom(self):
+    def update(self):
         self.create_display()
 
 class PlayerHand(pygame.sprite.Sprite, BoardObject):
@@ -531,7 +521,6 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         BoardObject.__init__(self)
         self.original_rect = pygame.rect.Rect(x, y, width, height)
         self.rect = pygame.rect.Rect(x, y, width, height)
-        self.static_rendering = False
         self.game = game
         self.group = group
         self._type = "player_hand"
@@ -573,7 +562,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
                 center_x = self.original_rect.x + (x + image_original_width / 2)
                 center_y = self.original_rect.y + (y + image_original_height / 2)
 
-                mouse_x, mouse_y = self.group.mouse_pos()
+                mouse_x, mouse_y = self.camera.mouse_pos()
                 dist = math.hypot(center_x - mouse_x, center_y - mouse_y)
                 if dist < closest_dist:
                     closest_dist = dist
@@ -637,7 +626,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
                 x = self.original_rect.x + start_x + i * self.margin + i * image_original_width
                 y = self.original_rect.y + start_y
                 rect = pygame.rect.Rect(x, y, image_original_width, image_original_height)
-                if rect.collidepoint(self.group.mouse_pos()):
+                if rect.collidepoint(self.game.camera.mouse_pos()):
                     image = self.deck[i]
                     self.remove_image(self.deck[i])
                     return image
@@ -699,7 +688,7 @@ class Button(pygame.sprite.Sprite, BoardObject):
     def clicked(self):
         pass
 
-    def update_zoom(self):
+    def update(self):
         self.create_display()
 
 class ShuffleButton(Button):
@@ -745,41 +734,14 @@ class RetrieveButton(Button):
                 ongoing_event = OngoingMove(image.rect.topleft, self.deck.rect.topleft, 45, image, self.game, callback)
                 game.add_ongoing(ongoing_event)
 
-class CameraGroup(pygame.sprite.Group):
-    def __init__(self):
-        super().__init__()
-        self.display_surface = pygame.display.get_surface()
+class Camera:
+    def __init__(self, sprite_group):
+        self.sprite_group = sprite_group
         self.zoom_scale = 1
+        self.offset_x = 0
+        self.offset_y = 0
         self.global_rotation = 0
         self.center()
-
-    def custom_draw(self):
-        self.display_surface.fill('#E1E1E1')
-
-        for sprite in sorted([s for s in self.sprites() if s.render], key= lambda x : x.z_index):
-            if sprite.static_rendering:
-                self.display_surface.blit(sprite.display, sprite.rect.topleft)
-                continue
-            # Sprite might be inner rotated
-            pos_x, pos_y = self.apply_zoom(*self.apply_rotation(*sprite.rect.topleft))
-            rotation = self.global_rotation + sprite.rotation
-            rotated_sprite = pygame.transform.rotate(sprite.display, self.global_rotation + sprite.rotation)
-            if self.global_rotation == 90:
-                pos_y -= sprite.rect.width
-            elif self.global_rotation == 180:
-                pos_x -= sprite.rect.width
-                pos_y -= sprite.rect.height
-            elif self.global_rotation == 270:
-                pos_x -= sprite.rect.height
-            self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
-
-        # Debugging
-        center = self.apply_zoom(0, 0)
-        pygame.draw.circle(self.display_surface, 'red', center, 10)
-        mouse_pos = self.reverse_zoom(*pygame.mouse.get_pos())
-        font = pygame.font.SysFont(None, 24)
-        text_surface = font.render(f'{mouse_pos}', True, 'black')
-        self.display_surface.blit(text_surface, (10, 10))
 
     def zoom(self, new_zoom_scale):
         self.zoom_scale = new_zoom_scale
@@ -792,55 +754,16 @@ class CameraGroup(pygame.sprite.Group):
             "selection": 101,
             "player_hand": 100,
         }
-        for sprite in sorted(self.sprites(), key=lambda x : order_priority[x._type]):
-            self.update_sprite_dimensions(sprite)
-            sprite.update_zoom()
+        for sprite in sorted(self.sprite_group.sprites(), key=lambda x : order_priority[x._type]):
+            # TODO: refactor
+            sprite.rect.width = sprite.original_rect.width * self.zoom_scale
+            sprite.rect.height = sprite.original_rect.height * self.zoom_scale
+            sprite.update()
 
     def move_camera(self, rel):
         rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
         self.offset_x += rel2[0]
         self.offset_y += rel2[1]
-
-    def move_sprite_abs(self, sprite, abs):
-        sprite.original_rect.move_ip(abs)
-        sprite.rect.move_ip(abs)
-
-    def move_sprite_rel(self, sprite, rel):
-        rel2 = (rel[0] / self.zoom_scale, rel[1] / self.zoom_scale)
-        sprite.original_rect.move_ip(rel2)
-        sprite.rect.move_ip(rel2)
-
-    def move_sprite_to(self, sprite, x, y):
-        sprite.original_rect.topleft = (x, y)
-        sprite.rect.topleft = (x, y)
-
-    def move_sprite_to_centered(self, sprite, x, y):
-        sprite.original_rect.center = (x, y)
-        sprite.rect.center = (x, y)
-
-    def move_sprite_to_centered_zoomed(self, sprite, x, y):
-        x, y = self.reverse_rotation(*self.reverse_zoom(x, y))
-        sprite.original_rect.topleft = (x - sprite.original_rect.width / 2, y - sprite.original_rect.height / 2)
-        sprite.rect.topleft = (x - sprite.rect.width / (2 * self.zoom_scale), y - sprite.rect.height / (2 * self.zoom_scale))
-
-    def update_sprite_dimensions(self, sprite):
-        scale_factor = self.zoom_scale
-        sprite.rect.width = sprite.original_rect.width * scale_factor
-        sprite.rect.height = sprite.original_rect.height * scale_factor
-
-    def colliderect(self, rect1, rect2):
-        def normalize(rect):
-            rect_copy = rect.copy()
-            rect_copy.width /= self.zoom_scale
-            rect_copy.height /= self.zoom_scale
-            return rect_copy
-        return normalize(rect1).colliderect(normalize(rect2))
-
-    def collidepoint(self, rect, point_pos):
-        return rect.collidepoint(self.reverse_rotation(*self.reverse_zoom(*point_pos)))
-
-    def mouse_pos(self):
-        return self.reverse_rotation(*self.reverse_zoom(*pygame.mouse.get_pos()))
 
     def apply_zoom(self, x, y):
         zoomed_x = (x + self.offset_x) * self.zoom_scale
@@ -865,8 +788,101 @@ class CameraGroup(pygame.sprite.Group):
         return reversed_x, reversed_y
 
     def center(self):
-        self.offset_x = self.display_surface.get_rect().width / 2
-        self.offset_y = self.display_surface.get_rect().height / 2
+        display_surface = pygame.display.get_surface()
+        self.offset_x = display_surface.get_rect().width / 2
+        self.offset_y = display_surface.get_rect().height / 2
+
+    def mouse_pos(self):
+        return self.reverse_rotation(*self.reverse_zoom(*pygame.mouse.get_pos()))
+
+class Renderer:
+    BACKGROUND_COLOR = "#E1E1E1"
+
+    def __init__(self, group):
+        self.display_surface = pygame.display.get_surface()
+        self.group = group
+
+    def render(self):
+        self.display_surface.fill(Renderer.BACKGROUND_COLOR)
+
+        for sprite in sorted([s for s in self.group.sprites() if s.render], key= lambda x : x.z_index):
+            if sprite.static_rendering:
+                self.display_surface.blit(sprite.display, sprite.rect.topleft)
+                continue
+            # Sprite might be inner rotated
+            pos_x, pos_y = self.camera.apply_zoom(*self.camera.apply_rotation(*sprite.rect.topleft))
+            global_rotation = self.camera.global_rotation
+            rotation = global_rotation + sprite.rotation
+            rotated_sprite = pygame.transform.rotate(sprite.display, global_rotation + sprite.rotation)
+            if global_rotation == 90:
+                pos_y -= sprite.rect.width
+            elif global_rotation == 180:
+                pos_x -= sprite.rect.width
+                pos_y -= sprite.rect.height
+            elif global_rotation == 270:
+                pos_x -= sprite.rect.height
+            self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
+
+        # Debugging
+        center = self.camera.apply_zoom(0, 0)
+        pygame.draw.circle(self.display_surface, 'red', center, 10)
+        mouse_pos = self.camera.reverse_zoom(*pygame.mouse.get_pos())
+        font = pygame.font.SysFont(None, 24)
+        text_surface = font.render(f'{mouse_pos}', True, 'black')
+        self.display_surface.blit(text_surface, (10, 10))
+
+class TransformManager:
+
+    def __init__(self, camera):
+        self.camera = camera
+
+    def move_sprite_abs(self, sprite, abs):
+        sprite.original_rect.move_ip(abs)
+        sprite.rect.move_ip(abs)
+
+    def move_sprite_to(self, sprite, x, y):
+        x = round(x / PIXEL_PERFECT) * PIXEL_PERFECT
+        y = round(y / PIXEL_PERFECT) * PIXEL_PERFECT
+        sprite.original_rect.topleft = (x, y)
+        sprite.rect.topleft = (x, y)
+
+    def move_sprite_to_centered(self, sprite, x, y):
+        sprite.original_rect.center = (x, y)
+        sprite.rect.center = (x, y)
+        # Experimental feature
+        x = round(sprite.rect.topleft[0] / PIXEL_PERFECT) * PIXEL_PERFECT
+        y = round(sprite.rect.topleft[1] / PIXEL_PERFECT) * PIXEL_PERFECT
+        sprite.original_rect.topleft = (x, y)
+        sprite.rect.topleft = (x, y)
+
+    def move_sprite_to_centered_zoomed(self, sprite, x, y):
+        x, y = self.camera.reverse_rotation(*self.camera.reverse_zoom(x, y))
+        # Experimental feature
+        x = round(x / PIXEL_PERFECT) * PIXEL_PERFECT
+        y = round(y / PIXEL_PERFECT) * PIXEL_PERFECT
+        sprite.original_rect.topleft = (x - sprite.original_rect.width / 2, y - sprite.original_rect.height / 2)
+        sprite.rect.topleft = (x - sprite.rect.width / (2 * self.camera.zoom_scale), y - sprite.rect.height / (2 * self.camera.zoom_scale))
+
+class CollisionManager:
+    
+    def __init__(self, camera):
+        self.camera = camera
+
+    def colliderect(self, rect1, rect2):
+        def normalize(rect):
+            rect_copy = rect.copy()
+            rect_copy.width /= self.camera.zoom_scale
+            rect_copy.height /= self.camera.zoom_scale
+            return rect_copy
+        return normalize(rect1).colliderect(normalize(rect2))
+
+    def collidepoint(self, rect, point_pos):
+        return rect.collidepoint(self.camera.reverse_rotation(*self.camera.reverse_zoom(*point_pos)))
+
+
+class SpriteGroup(pygame.sprite.Group):
+    def __init__(self):
+        super().__init__()
 
 class Game:
     WINDOW_WIDTH = 1280
@@ -881,7 +897,15 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = "playing"
-        self.camera_group = CameraGroup()
+
+        self.sprite_group = SpriteGroup()
+        self.renderer = Renderer(self.sprite_group)
+        self.camera = Camera(self.sprite_group)
+        self.collision_manager = CollisionManager(self.camera)
+        self.transform_manager = TransformManager(self.camera)
+        self.renderer.camera = self.camera
+        self.sprite_group.camera = self.camera
+
         self.font = pygame.font.SysFont(None, 36)
         self.moving_around_board = False
 
@@ -897,8 +921,8 @@ class Game:
         self.selection_present = False
 
         self.mp = {}
-        self.GIP = GameInfoProvider(self, self.camera_group)
-        self.GOM = GameObjectManipulator(self, self.camera_group, self.GIP)
+        self.GIP = GameInfoProvider(self, self.sprite_group)
+        self.GOM = GameObjectManipulator(self, self.sprite_group, self.GIP)
 
 
         def assign_id(obj):
@@ -908,9 +932,10 @@ class Game:
                 iota = max(self.mp.keys()) + 1
             obj._id = iota
             self.mp[obj._id] = obj
-        GameState.load_game_state(self, path="game_state.zip")
 
-        self.selection = Selection(self.camera_group, self)
+        GameState.load_game_state(self)
+
+        self.selection = Selection(self.sprite_group, self)
         assign_id(self.selection)
         self.assign_inf_z_index(self.selection)
         self.network_mg.set_networking(True)
@@ -920,8 +945,8 @@ class Game:
         while self.running:
             self.handle_events()
             self.handle_ongoing()
-            self.camera_group.update()
-            self.camera_group.custom_draw()
+            self.sprite_group.update()
+            self.renderer.render()
             self.network_mg.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
@@ -963,7 +988,7 @@ class Game:
         elif event.key in [pygame.K_z, pygame.K_x]:
             self.process_board_rotation(event)
         elif event.key in [pygame.K_c]:
-            self.camera_group.center()
+            self.camera.center()
         elif event.key in [pygame.K_j, pygame.K_i, pygame.K_k, pygame.K_l]:
             self.move_last_held_object(False)
         elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL):
@@ -980,7 +1005,7 @@ class Game:
         self.selection_present = False
 
     def move_selection(self):
-        self.selection.end_pos = self.camera_group.mouse_pos()
+        self.selection.end_pos = self.camera.mouse_pos()
 
     def move_last_held_object(self, count=True):
         if self.last_held_object is None:
@@ -1001,20 +1026,20 @@ class Game:
             dy = 1
         else:
             return
-        self.camera_group.move_sprite_abs(self.last_held_object, (dx, dy))
+        self.transform_manager.move_sprite_abs(self.last_held_object, (dx, dy))
 
     def process_board_rotation(self, event):
         direction = 1 if event.key == pygame.K_z else -1
-        self.camera_group.global_rotation = (self.camera_group.global_rotation + direction * ROTATION_STEP) % ROTATION_STEP_MOD
+        self.camera.global_rotation = (self.camera.global_rotation + direction * ROTATION_STEP) % ROTATION_STEP_MOD
 
     def process_rotation_clicked(self, event):
-        direction = 1 if event.key == pygame.K_z else -1
+        direction = 1 if event.key == pygame.K_q else -1
         if self.held_object is not None:
             self.GOM.try_rotate_obj(direction, self.held_object)
             return
         mouse_pos = pygame.mouse.get_pos()
         for obj in sorted(self.GIP.get_rendered_objects(), key= lambda x : -x.z_index):
-            if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
+            if self.collision_manager.collidepoint(obj.original_rect, mouse_pos):
                 self.GOM.try_rotate_obj(direction, obj)
                 break
 
@@ -1029,11 +1054,11 @@ class Game:
             self.process_mouse_hovering(event.pos)
 
     def process_moving_around_board(self, event):
-        self.camera_group.move_camera(event.rel)
+        self.camera.move_camera(event.rel)
 
     def process_mouse_hovering(self, mouse_pos):
         for sprite in self.GIP.get_rendered_objects():
-            if self.camera_group.collidepoint(sprite.original_rect, mouse_pos):
+            if self.collision_manager.collidepoint(sprite.original_rect, mouse_pos):
                 sprite.hovering()
             else:
                 sprite.not_hovering()
@@ -1046,7 +1071,7 @@ class Game:
             return
 
         for obj in sorted(self.GIP.get_rendered_objects(), key= lambda x : -x.z_index):
-            if self.camera_group.collidepoint(obj.original_rect, event.pos):
+            if self.collision_manager.collidepoint(obj.original_rect, event.pos):
                 self.is_holding_object = True
 
                 if obj in self.selection:
@@ -1088,7 +1113,7 @@ class Game:
         self.held_object = self.held_object.holding()
         if self.held_object is not None and self.GIP.can_drag(self.held_object):
             self.moved_holding_object = True
-            self.camera_group.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
+            self.transform_manager.move_sprite_to_centered_zoomed(self.held_object, event.pos[0], event.pos[1])
             self.assign_z_index(self.held_object)
             self.network_mg.move_object_send(self.held_object)
 
@@ -1106,8 +1131,8 @@ class Game:
         Returns:
             bool: True if an object was clicked, False otherwise.
         """
-        for obj in sorted([s for s in self.camera_group.sprites() if s.render and s.clickable], key= lambda x : -x.z_index):
-            if self.camera_group.collidepoint(obj.original_rect, mouse_pos):
+        for obj in sorted([s for s in self.sprite_group.sprites() if s.render and s.clickable], key= lambda x : -x.z_index):
+            if self.collision_manager.collidepoint(obj.original_rect, mouse_pos):
                 if obj in self.selection:
                     self.selection.clicked()
                     return True
@@ -1158,7 +1183,7 @@ class Game:
         next_zoom_index = self.zoom_index + event.y
         if 0 <= next_zoom_index < len(self.zooms):
             self.zoom_index = next_zoom_index
-            self.camera_group.zoom(self.zooms[self.zoom_index])
+            self.camera.zoom(self.zooms[self.zoom_index])
 
     def quit(self):
         """Quit the game and clean up resources."""
@@ -1168,7 +1193,6 @@ class GameObjectManipulator:
 
     def __init__(self, game, group, game_info_provider):
         self.game = game
-        self.camera_group = group
         self.GIP = game_info_provider
 
     def try_rotate_obj(self, direction, obj):
@@ -1179,7 +1203,7 @@ class GameObjectManipulator:
 class GameInfoProvider:
     def __init__(self, game, group):
         self.game = game
-        self.camera_group = group
+        self.sprite_group = group
 
     def can_rotate(self, obj):
         return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.rotatable)
@@ -1188,7 +1212,7 @@ class GameInfoProvider:
         return (pygame.key.get_mods() & pygame.KMOD_CTRL) or (obj is not None and obj.draggable)
 
     def get_sprites_of_type(self, _type):
-        return [item for item in self.camera_group.sprites() if item._type == _type]
+        return [item for item in self.sprite_group.sprites() if item._type == _type]
 
     def get_hands(self):
         return self.get_sprites_of_type("player_hand")
@@ -1197,7 +1221,7 @@ class GameInfoProvider:
         return self.get_sprites_of_type("holder")
 
     def get_rendered_objects(self):
-        return [s for s in self.camera_group.sprites() if s.render]
+        return [s for s in self.sprite_group.sprites() if s.render]
 
 class GameState:
 
@@ -1205,7 +1229,7 @@ class GameState:
     def save_game_state(game, output_zip_path="game_state.zip"):
         zipf = zipfile.ZipFile(output_zip_path, "w")
         game_state = []
-        for sprite in game.camera_group.sprites():
+        for sprite in game.sprite_group.sprites():
             if sprite._type == "image":
                 game_state.append({
                     "type": "image",
@@ -1227,7 +1251,7 @@ class GameState:
                     game_state[-1]["back_path"] = sprite.back_image_path
                     zipf.write(sprite.back_image_path, sprite.back_image_path)
                 zipf.write(sprite.front_image_path, sprite.front_image_path)
-        for sprite in game.camera_group.sprites():
+        for sprite in game.sprite_group.sprites():
             if sprite._type == "holder":
                 game_state.append({
                     "type": "holder",
@@ -1248,7 +1272,7 @@ class GameState:
                     "width": sprite.original_rect.width,
                     "height": sprite.original_rect.height
                 })
-        for sprite in game.camera_group.sprites():
+        for sprite in game.sprite_group.sprites():
             if "button" in sprite._type:
                 arr = {
                     "type": sprite._type,
@@ -1265,7 +1289,7 @@ class GameState:
                 elif sprite._type == "shuffle_button":
                     arr["holder"] = sprite.holder._id
                 game_state.append(arr)
-        for sprite in game.camera_group.sprites():
+        for sprite in game.sprite_group.sprites():
             if sprite._type == "dice":
                 game_state.append({
                     "type": "dice",
@@ -1293,9 +1317,9 @@ class GameState:
         for sprite in game_state:
             if sprite["type"] == "image":
                 if sprite["flipable"]:
-                    image = Image(sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game, flipable=True, back_path=sprite["back_path"])
+                    image = Image(sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game, flipable=True, back_path=sprite["back_path"])
                 else:
-                    image = Image(sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                    image = Image(sprite["front_path"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game)
                 image.z_index = sprite["z_index"]
                 image.render = sprite["render"]
                 image._id = sprite["id"]
@@ -1307,30 +1331,30 @@ class GameState:
                 image.update()
         for sprite in game_state:
             if sprite["type"] == "holder":
-                holder = Holder(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                holder = Holder(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game)
                 holder.z_index = sprite["z_index"]
                 holder._id = sprite["id"]
                 for image_id in sprite["deck"]:
                     holder.add_image(game.mp[image_id])
                 game.mp[holder._id] = holder
             elif sprite["type"] == "player_hand":
-                hand = PlayerHand(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                hand = PlayerHand(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game)
                 hand._id = sprite["id"]
                 game.mp[hand._id] = hand
         for sprite in game_state:
             if sprite["type"] == "shuffle_button":
-                button = ShuffleButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]])
+                button = ShuffleButton(game.sprite_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]])
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
             elif sprite["type"] == "retrieve_button":
                 images_to_retrieve = []
                 for image_id in sprite["images_to_retrieve"]:
                     images_to_retrieve.append(game.mp[image_id])
-                button = RetrieveButton(game.camera_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]], images_to_retrieve)
+                button = RetrieveButton(game.sprite_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]], images_to_retrieve)
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
             elif sprite["type"] == "dice":
-                dice = Dice(sprite["paths"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.camera_group, game)
+                dice = Dice(sprite["paths"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game)
                 dice.z_index = sprite["z_index"]
                 dice._id = sprite["id"]
                 dice.draggable = sprite["draggable"]
@@ -1356,7 +1380,7 @@ class NetworkManager:
     def move_object_received(self, message):
         x = message["x"]
         y = message["y"]
-        self.game.camera_group.move_sprite_to(self.game.mp[message["object_id"]], x, y)
+        self.game.transform_manager.move_sprite_to(self.game.mp[message["object_id"]], x, y)
 
     def flip_image_send(self, image):
         if not self.networking_status:
