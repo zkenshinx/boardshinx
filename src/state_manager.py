@@ -13,10 +13,10 @@ class GameStateManager:
                 game_state.append({
                     "type": "image",
                     "id": sprite._id,
-                    "x": sprite.original_rect.x,
-                    "y": sprite.original_rect.y,
-                    "width": sprite.original_rect.width,
-                    "height": sprite.original_rect.height,
+                    "x": sprite.world_rect.x,
+                    "y": sprite.world_rect.y,
+                    "width": sprite.world_rect.width,
+                    "height": sprite.world_rect.height,
                     "front_path": sprite.front_image_path,
                     "z_index": sprite.z_index,
                     "render": sprite.render,
@@ -35,10 +35,10 @@ class GameStateManager:
                 game_state.append({
                     "type": "holder",
                     "id": sprite._id,
-                    "x": sprite.original_rect.x,
-                    "y": sprite.original_rect.y,
-                    "width": sprite.original_rect.width,
-                    "height": sprite.original_rect.height,
+                    "x": sprite.world_rect.x,
+                    "y": sprite.world_rect.y,
+                    "width": sprite.world_rect.width,
+                    "height": sprite.world_rect.height,
                     "z_index": sprite.z_index,
                     "deck": [f._id for f in sprite.deck]
                 })
@@ -46,20 +46,20 @@ class GameStateManager:
                 game_state.append({
                     "type": "player_hand",
                     "id": sprite._id,
-                    "x": sprite.original_rect.x,
-                    "y": sprite.original_rect.y,
-                    "width": sprite.original_rect.width,
-                    "height": sprite.original_rect.height
+                    "x": sprite.world_rect.x,
+                    "y": sprite.world_rect.y,
+                    "width": sprite.world_rect.width,
+                    "height": sprite.world_rect.height
                 })
         for sprite in game.sprite_group.sprites():
             if "button" in sprite._type:
                 arr = {
                     "type": sprite._type,
                     "id": sprite._id,
-                    "x": sprite.original_rect.x,
-                    "y": sprite.original_rect.y,
-                    "width": sprite.original_rect.width,
-                    "height": sprite.original_rect.height,
+                    "x": sprite.world_rect.x,
+                    "y": sprite.world_rect.y,
+                    "width": sprite.world_rect.width,
+                    "height": sprite.world_rect.height,
                     "z_index": sprite.z_index,
                 }
                 if sprite._type == "retrieve_button":
@@ -73,10 +73,10 @@ class GameStateManager:
                 game_state.append({
                     "type": "dice",
                     "id": sprite._id,
-                    "x": sprite.original_rect.x,
-                    "y": sprite.original_rect.y,
-                    "width": sprite.original_rect.width,
-                    "height": sprite.original_rect.height,
+                    "x": sprite.world_rect.x,
+                    "y": sprite.world_rect.y,
+                    "width": sprite.world_rect.width,
+                    "height": sprite.world_rect.height,
                     "z_index": sprite.z_index,
                     "paths": sprite.paths,
                     "draggable": sprite.draggable,
