@@ -192,7 +192,6 @@ class Selection(pygame.sprite.Sprite, BoardObject):
     PHASE_SELECTING = 1
     PHASE_SELECTED = 2
 
-    """Represents a dice in the game."""
     def __init__(self, group, game):
         super().__init__(group)
         BoardObject.__init__(self)
@@ -201,8 +200,8 @@ class Selection(pygame.sprite.Sprite, BoardObject):
         self.render = False
         self._type = "selection"
         self.rotation = 0
-        self.start_pos = (0, 0)
-        self.end_pos = (0, 0)
+        self.world_start_pos = (0, 0)
+        self.world_end_pos = (0, 0)
         self.selected_objects = []
         self.phase = Selection.PHASE_NONE
         self.world_rect = pygame.rect.Rect(0, 0, 0, 0)
@@ -215,39 +214,42 @@ class Selection(pygame.sprite.Sprite, BoardObject):
 
     def create_display(self):
         surface = None
-        # TODO: why dice knows about zoom_scale?!?!?!
         scale = self.game.camera.zoom_scale
+        world_width = abs(self.world_end_pos[0] - self.world_start_pos[0])
+        world_height = abs(self.world_end_pos[1] - self.world_start_pos[1])
         if self.phase == Selection.PHASE_SELECTING:
-            width = abs(self.end_pos[0] - self.start_pos[0]) * scale
-            height = abs(self.end_pos[1] - self.start_pos[1]) * scale
 
-            surface = pygame.Surface((width, height), pygame.SRCALPHA)
+            screen_width = world_width * scale
+            screen_height = world_height * scale
+            surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
             surface.fill((173, 216, 230, 128))
-            pygame.draw.rect(surface, (0, 0, 255), (0, 0, width, height), 2)
+            pygame.draw.rect(surface, (0, 0, 255), (0, 0, screen_width, screen_height), 2)
 
+            x = min(self.world_start_pos[0], self.world_end_pos[0])
+            y = min(self.world_start_pos[1], self.world_end_pos[1])
+            self.world_rect = pygame.rect.Rect(x, y, world_width, world_height)
+            self.screen_rect = pygame.rect.Rect(x, y, screen_width, screen_height)
         elif self.phase == Selection.PHASE_SELECTED:
-            min_x = min(sprite.screen_rect.topleft[0] for sprite in self)
-            min_y = min(sprite.screen_rect.topleft[1] for sprite in self)
-            max_x = max(sprite.screen_rect.bottomright[0] for sprite in self)
-            max_y = max(sprite.screen_rect.bottomright[1] for sprite in self)
-            width = (max_x - min_x) * max(scale, 1 / scale)
-            height = (max_y - min_y) * max(scale, 1 / scale)
+            min_x = min(sprite.world_rect.topleft[0] for sprite in self)
+            min_y = min(sprite.world_rect.topleft[1] for sprite in self)
+            max_x = max(sprite.world_rect.bottomright[0] for sprite in self)
+            max_y = max(sprite.world_rect.bottomright[1] for sprite in self)
+            width = (max_x - min_x)
+            height = (max_y - min_y)
             surface = pygame.Surface((width, height), pygame.SRCALPHA)
 
             for sprite in self:
-                rect = sprite.rect.copy().move(-min_x, -min_y)
-                rect.x *= scale
-                rect.y *= scale
+                rect = sprite.world_rect.copy().move(-min_x, -min_y)
                 surface.fill((0, 0, 255, 100), rect)
-            self.start_pos = (min_x, min_y)
-            self.end_pos = (max_x, max_y)
+            self.world_start_pos = (min_x, min_y)
+            self.world_end_pos = (max_x, max_y)
+            self.world_rect = pygame.rect.Rect(min_x, min_y, max_x - min_x, max_y - min_y)
+            scaled_surface = pygame.transform.scale(surface, (width * scale, height * scale))
+            self.screen_rect = scaled_surface.get_rect(topleft=(min_x, min_y))
+            return scaled_surface
         else:
             return None
 
-        # TODO: is this correct?
-        self.world_rect = surface.get_rect(topleft=(min(self.start_pos[0], self.end_pos[0]),
-                                                        min(self.start_pos[1], self.end_pos[1])))
-        self.screen_rect = self.world_rect.copy()
         return surface
 
     def clicked(self):
@@ -282,18 +284,19 @@ class Selection(pygame.sprite.Sprite, BoardObject):
         pass
 
     def start_selection(self):
-        self.start_pos = self.game.camera.mouse_pos()
-        self.end_pos = self.start_pos
+        self.world_start_pos = self.game.camera.mouse_pos()
+        self.world_end_pos = self.world_start_pos
         self.render = True
         self.phase = Selection.PHASE_SELECTING
 
     def finish_selection(self):
         self.phase = Selection.PHASE_SELECTED
         self.selected_objects.clear()
+        print(self.world_rect)
         for sprite in self.game.GIP.get_rendered_objects():
             if sprite == self or not sprite.draggable:
                 continue
-            elif self.game.collision_manager.colliderect(self.screen_rect, sprite.screen_rect):
+            elif self.game.collision_manager.colliderect(self.world_rect, sprite.world_rect):
                 self.selected_objects.append(sprite)
         if len(self) == 0:
             self.reset()
@@ -758,7 +761,6 @@ class Camera:
             "player_hand": 100,
         }
         for sprite in sorted(self.sprite_group.sprites(), key=lambda x : order_priority[x._type]):
-            # TODO: refactor
             sprite.screen_rect.width = sprite.world_rect.width * self.zoom_scale
             sprite.screen_rect.height = sprite.world_rect.height * self.zoom_scale
             sprite.update()
@@ -1006,7 +1008,7 @@ class Game:
         self.selection_present = False
 
     def move_selection(self):
-        self.selection.end_pos = self.camera.mouse_pos()
+        self.selection.world_end_pos = self.camera.mouse_pos()
 
     def move_last_held_object(self, count=True):
         if self.last_held_object is None:
