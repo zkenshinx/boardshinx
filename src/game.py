@@ -895,15 +895,14 @@ class SpriteGroup(pygame.sprite.Group):
         super().__init__()
 
 class Game:
+    FPS = 60
     WINDOW_WIDTH = 1280
     WINDOW_HEIGHT = 720
-    FPS = 60
 
     def __init__(self):
         self.network_mg = NetworkManager(self, sys.argv[1] if len(sys.argv) > 1 else 'localhost')
         pygame.init()
         self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.RESIZABLE)
-        pygame.display.set_caption("Boardshinx")
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = "playing"
@@ -951,13 +950,13 @@ class Game:
 
     def run(self):
         """Main game loop."""
-        self.network_mg.start_networking()
+        # self.network_mg.start_networking()
         while self.running:
             self.handle_events()
             self.handle_ongoing()
             self.sprite_group.update()
             self.renderer.render()
-            self.network_mg.process_networking()
+            # self.network_mg.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
 

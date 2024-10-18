@@ -1,5 +1,5 @@
-from src import game
+from src import boardshinx
 
 if __name__ == "__main__":
-    g = game.Game()
-    g.run()
+    board = boardshinx.BoardShinx()
+    board.run()
