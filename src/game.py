@@ -1,15 +1,14 @@
 import math
 import json
-import socket
 import os
 import pygame, sys
 import random
 
-from uuid import uuid4
 from random import randint
 from functools import lru_cache
 
 from src.state_manager import GameStateManager
+from src.network_manager import NetworkManager
 
 ROTATION_STEP = 90
 ROTATION_STEP_MOD = 360
@@ -890,7 +889,7 @@ class Game:
     FPS = 60
 
     def __init__(self):
-        self.network_mg = NetworkManager(self)
+        self.network_mg = NetworkManager(self, sys.argv[1] if len(sys.argv) > 1 else 'localhost')
         pygame.init()
         self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.RESIZABLE)
         pygame.display.set_caption("Boardshinx")
@@ -932,25 +931,21 @@ class Game:
                 iota = max(self.mp.keys()) + 1
             obj._id = iota
             self.mp[obj._id] = obj
-        for v in ["green", "red", "blue"]:
-            sz = 45
-            meeple = Image(f"assets/Meeple-3D-{v}.svg", 200, 200, sz, sz, self.sprite_group, self)
-            assign_id(meeple)
-        GameStateManager.load_game_state(self)
+        GameStateManager.load_game_state(self, "dice_throne.zip")
 
         self.selection = Selection(self.sprite_group, self)
         assign_id(self.selection)
         self.assign_inf_z_index(self.selection)
-        self.network_mg.set_networking(True)
 
     def run(self):
         """Main game loop."""
+        # self.start_networking()
         while self.running:
             self.handle_events()
             self.handle_ongoing()
             self.sprite_group.update()
             self.renderer.render()
-            self.network_mg.process_networking()
+            # self.network_mg.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
 
@@ -1198,10 +1193,12 @@ class GameObjectManipulator:
         self.game = game
         self.GIP = game_info_provider
 
-    def try_rotate_obj(self, direction, obj):
+    def try_rotate_obj(self, direction, obj, send_message=True):
         if self.GIP.can_rotate(obj):
             obj.rotation = (obj.rotation + ROTATION_STEP * direction) % ROTATION_STEP_MOD
             obj.world_rect.width, obj.world_rect.height = obj.world_rect.height, obj.world_rect.width
+            if send_message:
+                self.game.network_mg.rotate_object_send(obj, direction)
 
 class GameInfoProvider:
     def __init__(self, game, group):
@@ -1225,205 +1222,3 @@ class GameInfoProvider:
 
     def get_rendered_objects(self):
         return [s for s in self.sprite_group.sprites() if s.render]
-
-class NetworkManager:
-
-    def move_object_send(self, obj):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "move_object",
-            "object_id": obj._id,
-            "x": obj.world_rect.x,
-            "y": obj.world_rect.y
-        }
-        self.send_to_server(message)
-
-    def move_object_received(self, message):
-        x = message["x"]
-        y = message["y"]
-        self.game.transform_manager.move_sprite_to(self.game.mp[message["object_id"]], x, y)
-
-    def flip_image_send(self, image):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "flip_image",
-            "image_id": image._id,
-            "is_front": image.is_front
-        }
-        self.send_to_server(message)
-
-    def flip_image_received(self, message):
-        image = self.game.mp[message["image_id"]]
-        image.assign_front(message["is_front"])
-        for holder in self.game.GIP.get_holders():
-            if image in holder.deck:
-                holder.create_display()
-
-    def add_image_to_holder_send(self, holder, image):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "add_image_to_holder",
-            "image_id": image._id,
-            "holder_id": holder._id
-        }
-        self.send_to_server(message)
-
-    def add_image_to_holder_received(self, message):
-        holder = self.game.mp[message["holder_id"]]
-        image = self.game.mp[message["image_id"]]
-        holder.add_image(image, False)
-
-    def remove_image_from_holder_send(self, holder, image):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "remove_image_from_holder",
-            "image_id": image._id,
-            "holder_id": holder._id
-        }
-        self.send_to_server(message)
-
-    def remove_image_from_holder_received(self, message):
-        holder = self.game.mp[message["holder_id"]]
-        holder.pop_image(self.game.mp[message["image_id"]], False)
-
-    def add_image_to_hand_send(self, image):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "add_image_to_hand",
-            "image_id": image._id
-        }
-        self.send_to_server(message)
-
-    def add_image_to_hand_received(self, message):
-        image = self.game.mp[message["image_id"]]
-        image.render = False
-
-    def remove_image_from_hand_send(self, image):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "remove_image_front_hand",
-            "image_id": image._id
-        }
-        self.send_to_server(message)
-
-    def remove_image_from_hand_received(self, message):
-        image = self.game.mp[message["image_id"]]
-        image.assign_front(False)
-        image.render = True
-
-    def shuffle_holder_send(self, holder):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "shuffle_holder",
-            "holder_id": holder._id,
-            "deck": [f._id for f in holder.deck]
-        }
-        self.send_to_server(message)
-
-    def shuffle_holder_received(self, message):
-        holder = self.game.mp[message["holder_id"]]
-        holder.shuffle([self.game.mp[image_id] for image_id in message["deck"]])
-
-    def rotate_object_send(self, obj, direction):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "rotate_object",
-            "object_id": obj._id,
-            "direction": direction
-        }
-        self.send_to_server(message)
-
-    def rotate_object_received(self, message):
-        self.game.mp[message["object_id"]].rotate(message["direction"], False)
-
-    def retrieve_button_clicked_send(self, button):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "retrieve_button_clicked",
-            "button_id": button._id
-        }
-        self.send_to_server(message)
-
-    def retrieve_button_clicked_received(self, message):
-        self.game.mp[message["button_id"]].retrieve()
-
-    def shuffle_button_clicked_send(self, button):
-        if not self.networking_status:
-            return
-        message = {
-            "action": "shuffle_button_clicked",
-            "button_id": button._id
-        }
-        self.send_to_server(message)
-
-    def shuffle_button_clicked_received(self, message):
-        self.game.mp[message["button_id"]].shuffle()
-
-    def connect_to_server(self):
-        message = {
-            "action": "join",
-            "name": str(uuid4())
-        }
-        self.send_to_server(message)
-
-    def process_networking(self):
-        for i in range(15):
-            message = self.get_from_server()
-            if message is not None:
-                self.received_mapping[message["action"]](message)
-    
-    def get_from_server(self):
-        try:
-            data, _ = self.sock.recvfrom(self.BUFFER_SIZE)
-            message = json.loads(data.decode('utf-8'))
-            return message
-        except BlockingIOError:
-            return None
-
-    def send_to_server(self, data):
-        message = json.dumps(data).encode('utf-8')
-        self.sock.sendto(message, (self.SERVER_IP, self.SERVER_PORT))
-
-    def init_networking(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setblocking(False)
-
-    def init_functions(self):
-        self.received_mapping = {
-            "flip_image": self.flip_image_received,
-            "move_object": self.move_object_received,
-            "add_image_to_holder": self.add_image_to_holder_received,
-            "remove_image_from_holder": self.remove_image_from_holder_received,
-            "add_image_to_hand": self.add_image_to_hand_received,
-            "remove_image_from_hand": self.remove_image_from_hand_received,
-            "shuffle_holder": self.shuffle_holder_received,
-            "rotate_object": self.rotate_object_received,
-            "retrieve_button_clicked": self.retrieve_button_clicked_received,
-            "shuffle_button_clicked": self.shuffle_button_clicked_received,
-        }
-
-    def set_networking(self, status):
-        self.networking_status = status
-
-    def __init__(self, game):
-        self.networking_status = False
-        self.game = game
-        if len(sys.argv) > 1:
-            self.SERVER_IP = sys.argv[1]
-        else:
-            self.SERVER_IP = 'localhost'
-        self.SERVER_PORT = 23456
-        self.BUFFER_SIZE = 1024
-        self.init_functions()
-        self.init_networking()
-        self.connect_to_server()
-
