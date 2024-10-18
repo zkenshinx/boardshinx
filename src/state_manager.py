@@ -90,7 +90,7 @@ class GameStateManager:
     @staticmethod
     def load_game_state(game, input_zip_path="game_state.zip"):
         zipf = zipfile.ZipFile(input_zip_path, "r")
-        zipf.extractall()
+        # zipf.extractall()
         with open("game_state.json", 'r') as file:
             game_state = json.load(file)
         for sprite in game_state:

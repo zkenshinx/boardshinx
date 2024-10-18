@@ -126,11 +126,12 @@ class Image(pygame.sprite.Sprite, BoardObject):
             if self.game.collision_manager.colliderect(self.world_rect, hand.world_rect):
                 hand.add_image(self)
 
-    def flip(self):
+    def flip(self, send_message=True):
         if not self.flipable:
             return
         self.is_front = not self.is_front
-        self.game.network_mg.flip_image_send(self)
+        if send_message:
+            self.game.network_mg.flip_image_send(self)
         self.update()
 
     def mark_focused(self, is_focused):
@@ -174,9 +175,17 @@ class Dice(pygame.sprite.Sprite, BoardObject):
     def clicked(self):
         self.roll()
 
-    def roll(self):
-        ongoing_event = OngoingRoll(self, self.game)
+    def roll(self, result=None, send_message=True):
+        if result is None:
+            result = random.randint(0, len(self.paths) - 1)
+        ongoing_event = OngoingRoll(self, result, self.game)
         self.game.add_ongoing(ongoing_event)
+        if send_message:
+            self.game.network_mg.dice_rolled_send(self, result)
+
+    def set_specific(self, ind):
+        self.current_image_path = self.paths[ind]
+        self.update()
 
     def set_random(self):
         self.current_image_path = random.choice(self.paths)
@@ -392,9 +401,10 @@ class OngoingShuffle:
             return True
 
 class OngoingRoll:
-    def __init__(self, dice, game):
+    def __init__(self, dice, result, game):
         self.game = game
         self.dice = dice
+        self.result = result
         self.step = 0
         self.start_rect = self.dice.world_rect.copy()
 
@@ -416,6 +426,7 @@ class OngoingRoll:
     def is_finished(self):
         if self.step >= 50:
             self.game.transform_manager.move_sprite_to(self.dice, self.start_rect.x, self.start_rect.y)
+            self.dice.set_specific(self.result)
             return True
         return False
 
@@ -607,8 +618,8 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
             self.game.network_mg.add_image_to_hand_send(image)
             image.render = False
             self.mark_focused(False)
-            #if not image.is_front:
-            #    image.flip()
+            if not image.is_front:
+                image.flip(False)
             self.deck.insert(self.insert_image_index, image)
 
     def remove_image(self, image):
@@ -932,6 +943,7 @@ class Game:
             obj._id = iota
             self.mp[obj._id] = obj
         GameStateManager.load_game_state(self, "dice_throne.zip")
+        self.network_mg.set_networking(True)
 
         self.selection = Selection(self.sprite_group, self)
         assign_id(self.selection)
@@ -939,13 +951,13 @@ class Game:
 
     def run(self):
         """Main game loop."""
-        # self.start_networking()
+        self.network_mg.start_networking()
         while self.running:
             self.handle_events()
             self.handle_ongoing()
             self.sprite_group.update()
             self.renderer.render()
-            # self.network_mg.process_networking()
+            self.network_mg.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
 

@@ -81,10 +81,13 @@ def send_file_to_client(client_socket):
         "action": "join"
     }
     try:
+        print('hi')
         with open('from_server.zip', 'rb') as f:
             encoded = base64.b64encode(f.read()).decode('utf-8')
+        print('ho')
         result["game_state"] = encoded
         message = json.dumps(result).encode('utf-8')
+        print(len(message))
         client_socket.send(message)
         client_socket.send(MESSAGE_END)
         print("Zip send to client")
@@ -110,13 +113,14 @@ def handle_tcp_client(client_socket, addr):
                 if message['action'] == 'join':
                     c = Client(message['name'], addr, client_socket)
                     clients_tcp.append(c)
-                    send_file_to_client(client_socket)
+                    # send_file_to_client(client_socket)
                     continue
                 broadcast_update_tcp(message, addr)
         # TODO: race condition
         for i in range(len(clients_tcp)):
             if clients_tcp[i].addr == addr:
                 del clients_tcp[i]
+                break
     except json.JSONDecodeError:
         print("Received malformed JSON message.")
     except Exception as e:

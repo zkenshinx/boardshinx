@@ -91,7 +91,7 @@ class NetworkManager:
         if not self.networking_status:
             return
         message = {
-            "action": "remove_image_front_hand",
+            "action": "remove_image_from_hand",
             "image_id": image._id
         }
         self.send_to_server(message)
@@ -153,6 +153,20 @@ class NetworkManager:
     def shuffle_button_clicked_received(self, message):
         self.game.mp[message["button_id"]].shuffle()
 
+    def dice_rolled_send(self, dice, dice_result):
+        if not self.networking_status:
+            return
+        message = {
+            "action": "dice_rolled",
+            "dice_id": dice._id,
+            "result": dice_result
+        }
+        self.send_to_server(message, "tcp")
+
+    def dice_rolled_received(self, message):
+        dice = self.game.mp[message["dice_id"]]
+        dice.roll(result=message["result"], send_message=False)
+
     def connect_to_server(self):
         message = {
             "action": "join",
@@ -165,6 +179,9 @@ class NetworkManager:
         game_name = f"{str(uuid4())}.zip"
         with open(game_name, "wb") as f:
             f.write(base64.b64decode(message["game_state"]))
+        from random import randint
+        from time import sleep
+        sleep(randint(1, 100) * 0.01)
         GameStateManager.load_game_state(self.game, game_name)
         self.set_networking(True)
 
@@ -189,16 +206,15 @@ class NetworkManager:
             return None
 
     def get_from_server_tcp(self):
+        pos = self.tcp_data.find(MESSAGE_END)
+        if pos != -1:
+            before_message = self.tcp_data[:pos].decode('utf-8')
+            self.tcp_data = self.tcp_data[pos + len(MESSAGE_END):]
+            return json.loads(before_message)
         try:
             data = self.tcp_sock.recv(self.TCP_BUFFER_SIZE)
-            if not data:
-                return None
-            self.tcp_data.extend(data)
-            pos = self.tcp_data.find(MESSAGE_END)
-            if pos != -1:
-                before_message = self.tcp_data[:pos].decode('utf-8')
-                self.tcp_data = self.tcp_data[pos + len(MESSAGE_END):]
-                return json.loads(before_message)
+            if data:
+                self.tcp_data.extend(data)
             return None
         except BlockingIOError:
             return None
@@ -234,13 +250,14 @@ class NetworkManager:
             "rotate_object": self.rotate_object_received,
             "retrieve_button_clicked": self.retrieve_button_clicked_received,
             "shuffle_button_clicked": self.shuffle_button_clicked_received,
-            "join": self.connect_to_server_received
+            "join": self.connect_to_server_received,
+            "dice_rolled": self.dice_rolled_received
         }
 
     def set_networking(self, status):
         self.networking_status = status
 
-    def start_networking():
+    def start_networking(self):
         self.init_functions()
         self.init_networking()
         self.connect_to_server()
@@ -254,5 +271,5 @@ class NetworkManager:
         with open('server/port', 'r') as f:
             self.SERVER_TCP_PORT = int(f.read())
         self.UDP_BUFFER_SIZE = 1024
-        self.TCP_BUFFER_SIZE = 4096 * 4
+        self.TCP_BUFFER_SIZE = 4096 * 4 * 4
 
