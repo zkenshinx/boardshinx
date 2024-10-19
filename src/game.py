@@ -1130,16 +1130,6 @@ class Game:
         self.held_object.release()
 
     def process_click(self, mouse_pos):
-        """
-        Processes a mouse click by checking if any rendered object is clicked.
-        It triggers the clicked object's 'clicked' method. 
-
-        Args:
-            mouse_pos (tuple): The (x, y) position of the mouse click.
-
-        Returns:
-            bool: True if an object was clicked, False otherwise.
-        """
         for obj in sorted([s for s in self.sprite_group.sprites() if s.render and s.clickable], key= lambda x : -x.z_index):
             if self.collision_manager.collidepoint(obj.world_rect, mouse_pos):
                 if obj in self.selection:
@@ -1166,25 +1156,11 @@ class Game:
             self.z_index_iota = max(self.z_index_iota, self.mp[obj].z_index + 1)
 
     def assign_z_index(self, obj):
-        """
-        Assigns a unique z-index to the given object. 
-        Each object is assigned a higher z-index sequentially.
-        
-        Args:
-            obj: The object to assign the z-index to.
-        """
         if obj is not None:
             obj.z_index = self.z_index_iota
             self.z_index_iota += 1
 
     def assign_inf_z_index(self, obj):
-        """
-        Assigns an infinite z-index to the given object. This effectively ensures 
-        that the object is always rendered on top of any other object.
-        
-        Args:
-            obj: The object to assign the infinite z-index to.
-        """
         if obj is not None:
             obj.z_index = float('inf')
 
@@ -1195,7 +1171,6 @@ class Game:
             self.camera.zoom(self.zooms[self.zoom_index])
 
     def quit(self):
-        """Quit the game and clean up resources."""
         pygame.quit()
 
 class GameObjectManipulator:

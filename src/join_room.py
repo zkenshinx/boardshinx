@@ -1,5 +1,6 @@
 import pygame
-from .board_state import BoardState
+from .board_state import BoardState, BoardStateType
+from .network_manager import TCPClient, UDPClient
 
 class JoinRoom(BoardState):
     FPS = 30
@@ -32,12 +33,29 @@ class JoinRoom(BoardState):
         self.join_button_rect = pygame.Rect(0, 0, self.BUTTON_W, self.BUTTON_H)
         self.show_colors = False
 
+        self.tcp_client = TCPClient()
+        self.udp_client = UDPClient()
+        self.tcp_client.add_callback("join", self.handle_join_received)
+
     def entry(self, data=None):
-        while True:
+        while self.state_manager.get_state() == BoardStateType.JOIN_ROOM:
             self.handle_events()
             self.draw()
+            self.tcp_client.process()
             self.clock.tick(self.FPS)
-        return data
+        return {
+            "tcp_client": self.tcp_client,
+            "udp_client": self.udp_client
+        }
+
+    def handle_join_received(self, message):
+        print(message)
+        if message["result"] == "success":
+            self.show_colors = True
+            self.error_message = ""
+        else:
+            self.show_colors = False
+            self.error_message = message.get("message", "An error occurred.")
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -74,12 +92,20 @@ class JoinRoom(BoardState):
     def find_room(self):
         self.user_name = self.user_name.lower()
 
+        if len(self.room_code) == 0:
+            return
+
         if not self.user_name.isalpha() or len(self.user_name) == 0:
             return
 
+        self.tcp_client.send({
+            "action": "join",
+            "room": self.room_code,
+            "name": self.user_name
+        })
         print(f"Finding room {self.room_code} for user {self.user_name}")
-        self.show_colors = True
 
+        
     def draw(self):
         self.screen.fill("#FFFFFF")
 
@@ -116,6 +142,12 @@ class JoinRoom(BoardState):
         button_text_surface = self.font.render("Find", True, (255, 255, 255))
         text_rect = button_text_surface.get_rect(center=self.join_button_rect.center)
         self.screen.blit(button_text_surface, text_rect)
+
+        # Draw Error Message if any
+        if hasattr(self, 'error_message'):
+            error_surface = self.label_font.render(self.error_message, True, (255, 0, 0))
+            error_rect = error_surface.get_rect(center=(self.screen.get_width() // 2, self.BUTTON_Y + 70))
+            self.screen.blit(error_surface, error_rect)
 
         if self.show_colors:
             # Draw color selection text
