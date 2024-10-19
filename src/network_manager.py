@@ -188,17 +188,14 @@ class NetworkManager:
 
     def get_game_state(self):
         message = {
-            "action": "get_game_state",
-            "name": str(uuid4())
+            "action": "get_game_state"
         }
+        self.tcp_client.send(message)
 
     def get_game_state_received(self, message):
         game_name = f"{str(uuid4())}.zip"
         with open(game_name, "wb") as f:
             f.write(base64.b64decode(message["game_state"]))
-        #from random import randint
-        #from time import sleep
-        #sleep(randint(1, 100) * 0.01)
         GameStateManager.load_game_state(self.game, game_name)
         self.set_networking(True)
 
@@ -215,7 +212,8 @@ class NetworkManager:
             "retrieve_button_clicked": self.retrieve_button_clicked_received,
             "shuffle_button_clicked": self.shuffle_button_clicked_received,
             "dice_rolled": self.dice_rolled_received,
-            "cursor_moved": self.cursor_moved_received
+            "cursor_moved": self.cursor_moved_received,
+            "get_game_state": self.get_game_state_received
         }
         for action_name, fn in fns.items():
             self.tcp_client.add_callback(action_name, fn)
@@ -302,7 +300,7 @@ class TCPClient(NetworkClient):
         super().__init__()
         self.SERVER_IP = ip
         self.SERVER_TCP_PORT = port
-        with open('server/port', 'r') as f:
+        with open('port', 'r') as f:
             self.SERVER_TCP_PORT = int(f.read())
         self.TCP_BUFFER_SIZE = 4096 * 4 * 4
         self.tcp_data = bytearray()

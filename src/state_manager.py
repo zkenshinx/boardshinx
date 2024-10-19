@@ -125,6 +125,7 @@ class GameStateManager:
                 button = game_module.ShuffleButton(game.sprite_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]])
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
+                game.mp[button._id] = button
             elif sprite["type"] == "retrieve_button":
                 images_to_retrieve = []
                 for image_id in sprite["images_to_retrieve"]:
@@ -132,6 +133,7 @@ class GameStateManager:
                 button = game_module.RetrieveButton(game.sprite_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]], images_to_retrieve)
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
+                game.mp[button._id] = button
             elif sprite["type"] == "dice":
                 dice = game_module.Dice(sprite["paths"], sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game)
                 dice.z_index = sprite["z_index"]

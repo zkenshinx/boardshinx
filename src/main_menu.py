@@ -6,7 +6,7 @@ class MainMenu(BoardState):
     BUTTON_W = 270
     BUTTON_H = 125
 
-    def __init__(self, state_manager):
+    def __init__(self, state_manager, data=None):
         super().__init__(state_manager)
         self.screen = pygame.display.get_surface()
         self.clock = pygame.time.Clock()
@@ -25,13 +25,13 @@ class MainMenu(BoardState):
         self.hover_button = self.button.copy()
         self.hover_button.fill((170, 170, 170), special_flags=pygame.BLEND_MULT)
 
-    def entry(self, data=None):
+    def entry(self):
         while True:
             if self.handle_events():
                 break
             self.draw()
             self.clock.tick(self.FPS)
-        return data
+        return None
     
     def handle_events(self):
         for event in pygame.event.get():

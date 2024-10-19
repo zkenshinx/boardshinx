@@ -209,6 +209,9 @@ class TCPServer:
             send_message = room.assign_color(name, color)
             self.send(client_socket, json.dumps(send_message).encode('utf-8'))
             return
+        elif message['action'] == 'get_game_state':
+            self.send_file(client_socket)
+            return 
         self.broadcast(message, addr)
 
     def get_name(self, client_socket):

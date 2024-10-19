@@ -875,7 +875,7 @@ class Renderer:
             # Sprite might be inner rotated
             pos_x, pos_y = self.camera.apply_zoom(*self.camera.apply_rotation(*sprite.screen_rect.topleft))
             global_rotation = self.camera.global_rotation
-            rotation = global_rotation + sprite.rotation
+            rotation = 0 if sprite._type == "cursor" else global_rotation + sprite.rotation
             rotated_sprite = pygame.transform.rotate(sprite.display, rotation)
             if global_rotation == 90:
                 pos_y -= sprite.screen_rect.width
@@ -887,12 +887,12 @@ class Renderer:
             self.display_surface.blit(rotated_sprite, (pos_x, pos_y))
 
         # Debugging
-        center = self.camera.apply_zoom(0, 0)
-        pygame.draw.circle(self.display_surface, 'red', center, 10)
-        mouse_pos = self.camera.reverse_zoom(*pygame.mouse.get_pos())
-        font = pygame.font.SysFont(None, 24)
-        text_surface = font.render(f'{mouse_pos}', True, 'black')
-        self.display_surface.blit(text_surface, (10, 10))
+        #center = self.camera.apply_zoom(0, 0)
+        #pygame.draw.circle(self.display_surface, 'red', center, 10)
+        #mouse_pos = self.camera.reverse_zoom(*pygame.mouse.get_pos())
+        #font = pygame.font.SysFont(None, 24)
+        #text_surface = font.render(f'{mouse_pos}', True, 'black')
+        #self.display_surface.blit(text_surface, (10, 10))
 
 class TransformManager:
 
@@ -994,7 +994,7 @@ class Game(BoardState):
                 iota = max(self.mp.keys()) + 1
             obj._id = iota
             self.mp[obj._id] = obj
-        GameStateManager.load_game_state(self, "dice_throne.zip")
+        #GameStateManager.load_game_state(self, "dice_throne.zip")
 
         self.selection = Selection(self.color, self.sprite_group, self)
         assign_id(self.selection)
@@ -1002,7 +1002,7 @@ class Game(BoardState):
 
     def entry(self):
         """Main game loop."""
-        self.network_mg.set_networking(True)
+        self.network_mg.get_game_state()
         while self.running:
             self.handle_events()
             self.handle_ongoing()

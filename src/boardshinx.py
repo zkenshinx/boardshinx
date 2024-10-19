@@ -12,7 +12,7 @@ class BoardShinx:
         pygame.init()
         self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.RESIZABLE)
         pygame.display.set_caption("Boardshinx")
-        self.state = BoardStateType.JOIN_ROOM
+        self.state = BoardStateType.MAIN_MENU
         self.states = {
             BoardStateType.MAIN_MENU: MainMenu,
             BoardStateType.JOIN_ROOM: JoinRoom,
