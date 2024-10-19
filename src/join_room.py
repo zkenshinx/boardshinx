@@ -16,10 +16,8 @@ class JoinRoom(BoardState):
     BUTTON_Y = 400
     COLOR_BOX_SIZE = 80
     COLOR_Y_OFFSET = 520
-    COLORS = [(0, 255, 0), (0, 255, 255), (255, 0, 0), 
-              (255, 165, 0), (127, 0, 255), (139, 69, 19)]  # Green, Blue, Red, Orange, Violet, Brown
 
-    def __init__(self, state_manager):
+    def __init__(self, state_manager, data=None):
         super().__init__(state_manager)
         self.screen = pygame.display.get_surface()
         self.clock = pygame.time.Clock()
@@ -32,12 +30,16 @@ class JoinRoom(BoardState):
         self.input_active = [False, False]
         self.join_button_rect = pygame.Rect(0, 0, self.BUTTON_W, self.BUTTON_H)
         self.show_colors = False
+        self.available_colors = []
+
+        self.assigned_color = None
 
         self.tcp_client = TCPClient()
         self.udp_client = UDPClient()
         self.tcp_client.add_callback("join", self.handle_join_received)
+        self.tcp_client.add_callback("assign_color", self.assign_color_received)
 
-    def entry(self, data=None):
+    def entry(self):
         while self.state_manager.get_state() == BoardStateType.JOIN_ROOM:
             self.handle_events()
             self.draw()
@@ -45,17 +47,31 @@ class JoinRoom(BoardState):
             self.clock.tick(self.FPS)
         return {
             "tcp_client": self.tcp_client,
-            "udp_client": self.udp_client
+            "udp_client": self.udp_client,
+            "color": self.assigned_color
         }
 
     def handle_join_received(self, message):
-        print(message)
         if message["result"] == "success":
             self.show_colors = True
+            self.available_colors = message.get("colors", [])
             self.error_message = ""
+            self.udp_client.send({
+                "action": "join",
+                "name": message["name"]
+            })
         else:
             self.show_colors = False
             self.error_message = message.get("message", "An error occurred.")
+
+    def assign_color_received(self, message):
+        if message["result"] == "success":
+            self.assigned_color = message["color"]
+            self.state_manager.set_state(BoardStateType.GAME)
+        else:
+            self.error_message = "Someone already got the color :)"
+            self.available_colors = message.get("colors", [])
+            return False
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -64,14 +80,12 @@ class JoinRoom(BoardState):
                 exit()
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.show_colors:
-                    # Check if a color box was clicked
-                    # TODO: improve
-                    for i in range(6):
-                        box_rect = pygame.Rect((self.screen.get_width() - self.COLOR_BOX_SIZE) // 2 + (i % 3) * (self.COLOR_BOX_SIZE + 10), 
-                                               self.COLOR_Y_OFFSET + (i // 3) * (self.COLOR_BOX_SIZE + 10), 
-                                               self.COLOR_BOX_SIZE, self.COLOR_BOX_SIZE)
+                    for i, color in enumerate(self.available_colors):
+                        box_x = (self.screen.get_width() - self.COLOR_BOX_SIZE * 3 - 10) // 2 + (i % 3) * (self.COLOR_BOX_SIZE + 10)
+                        box_y = self.COLOR_Y_OFFSET + (i // 3) * (self.COLOR_BOX_SIZE + 10)
+                        box_rect = pygame.Rect(box_x, box_y, self.COLOR_BOX_SIZE, self.COLOR_BOX_SIZE)
                         if box_rect.collidepoint(event.pos):
-                            print(f"Selected color: {self.COLORS[i]}")
+                            self.color_chosen(color)
                 elif self.join_button_rect.collidepoint(event.pos):
                     self.find_room()
                 else:
@@ -89,6 +103,12 @@ class JoinRoom(BoardState):
                     else:
                         self.user_name += event.unicode
 
+    def color_chosen(self, color):
+        self.tcp_client.send({
+            "action": "color_chosen",
+            "color": color
+        })
+
     def find_room(self):
         self.user_name = self.user_name.lower()
 
@@ -103,9 +123,7 @@ class JoinRoom(BoardState):
             "room": self.room_code,
             "name": self.user_name
         })
-        print(f"Finding room {self.room_code} for user {self.user_name}")
 
-        
     def draw(self):
         self.screen.fill("#FFFFFF")
 
@@ -156,11 +174,11 @@ class JoinRoom(BoardState):
             self.screen.blit(color_text_surface, color_text_rect)
 
             # Draw Color Boxes
-            for i in range(6):
+            for i, color in enumerate(self.available_colors):
                 box_x = (self.screen.get_width() - self.COLOR_BOX_SIZE * 3 - 10) // 2 + (i % 3) * (self.COLOR_BOX_SIZE + 10)
                 box_y = self.COLOR_Y_OFFSET + (i // 3) * (self.COLOR_BOX_SIZE + 10)
                 box_rect = pygame.Rect(box_x, box_y, self.COLOR_BOX_SIZE, self.COLOR_BOX_SIZE)
-                pygame.draw.rect(self.screen, self.COLORS[i], box_rect)
+                pygame.draw.rect(self.screen, color, box_rect)
 
         pygame.display.flip()
 

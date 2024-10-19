@@ -20,7 +20,7 @@ class NetworkManager:
             "x": obj.world_rect.x,
             "y": obj.world_rect.y
         }
-        self.send_to_server(message)
+        self.udp_client.send(message)
 
     def move_object_received(self, message):
         x = message["x"]
@@ -35,7 +35,7 @@ class NetworkManager:
             "image_id": image._id,
             "is_front": image.is_front
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def flip_image_received(self, message):
         image = self.game.mp[message["image_id"]]
@@ -47,13 +47,12 @@ class NetworkManager:
     def add_image_to_holder_send(self, holder, image):
         if not self.networking_status:
             return
-        print(self.networking_status)
         message = {
             "action": "add_image_to_holder",
             "image_id": image._id,
             "holder_id": holder._id
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def add_image_to_holder_received(self, message):
         holder = self.game.mp[message["holder_id"]]
@@ -68,7 +67,7 @@ class NetworkManager:
             "image_id": image._id,
             "holder_id": holder._id
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def remove_image_from_holder_received(self, message):
         holder = self.game.mp[message["holder_id"]]
@@ -81,7 +80,7 @@ class NetworkManager:
             "action": "add_image_to_hand",
             "image_id": image._id
         }
-        self.send_to_server(message)
+        self.tcp_client.send(message)
 
     def add_image_to_hand_received(self, message):
         image = self.game.mp[message["image_id"]]
@@ -94,7 +93,7 @@ class NetworkManager:
             "action": "remove_image_from_hand",
             "image_id": image._id
         }
-        self.send_to_server(message)
+        self.tcp_client.send(message)
 
     def remove_image_from_hand_received(self, message):
         image = self.game.mp[message["image_id"]]
@@ -109,7 +108,7 @@ class NetworkManager:
             "holder_id": holder._id,
             "deck": [f._id for f in holder.deck]
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def shuffle_holder_received(self, message):
         holder = self.game.mp[message["holder_id"]]
@@ -123,7 +122,7 @@ class NetworkManager:
             "object_id": obj._id,
             "direction": direction
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def rotate_object_received(self, message):
         obj = self.game.mp[message["object_id"]]
@@ -136,7 +135,7 @@ class NetworkManager:
             "action": "retrieve_button_clicked",
             "button_id": button._id
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def retrieve_button_clicked_received(self, message):
         self.game.mp[message["button_id"]].retrieve()
@@ -148,7 +147,7 @@ class NetworkManager:
             "action": "shuffle_button_clicked",
             "button_id": button._id
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def shuffle_button_clicked_received(self, message):
         self.game.mp[message["button_id"]].shuffle()
@@ -161,21 +160,19 @@ class NetworkManager:
             "dice_id": dice._id,
             "result": dice_result
         }
-        self.send_to_server(message, "tcp")
+        self.tcp_client.send(message)
 
     def dice_rolled_received(self, message):
         dice = self.game.mp[message["dice_id"]]
         dice.roll(result=message["result"], send_message=False)
 
-    def connect_to_server(self):
+    def get_game_state(self):
         message = {
-            "action": "join",
+            "action": "get_game_state",
             "name": str(uuid4())
         }
-        self.send_to_server(message, "udp")
-        self.send_to_server(message, "tcp")
 
-    def connect_to_server_received(self, message):
+    def get_game_state_received(self, message):
         game_name = f"{str(uuid4())}.zip"
         with open(game_name, "wb") as f:
             f.write(base64.b64decode(message["game_state"]))
@@ -186,7 +183,7 @@ class NetworkManager:
         self.set_networking(True)
 
     def init_functions(self):
-        self.callbacks = {
+        fns = {
             "flip_image": self.flip_image_received,
             "move_object": self.move_object_received,
             "add_image_to_holder": self.add_image_to_holder_received,
@@ -197,21 +194,28 @@ class NetworkManager:
             "rotate_object": self.rotate_object_received,
             "retrieve_button_clicked": self.retrieve_button_clicked_received,
             "shuffle_button_clicked": self.shuffle_button_clicked_received,
-            "join": self.connect_to_server_received,
             "dice_rolled": self.dice_rolled_received
         }
+        for action_name, fn in fns.items():
+            self.tcp_client.add_callback(action_name, fn)
+            self.udp_client.add_callback(action_name, fn)
 
     def set_networking(self, status):
         self.networking_status = status
 
-    def start_networking(self):
-        self.init_functions()
-        self.init_networking()
-        self.connect_to_server()
+    def process_networking(self):
+        for i in range(8):
+            if i < 4:
+                self.tcp_client.process()
+            else:
+                self.udp_client.process()
 
-    def __init__(self, game, ip):
+    def __init__(self, game, tcp_client, udp_client):
         self.networking_status = False
         self.game = game
+        self.tcp_client = tcp_client
+        self.udp_client = udp_client
+        self.init_functions()
 
 class NetworkClient:
     def __init__(self):
@@ -231,12 +235,11 @@ class NetworkClient:
             return None
 
     def process(self):
-        for i in range(8):
-            message = self.get()
-            if message is not None and "action" in message:
-                action = message["action"]
-                if action in self.callbacks:
-                    self.callbacks[message["action"]](message)
+        message = self.get()
+        if message is not None and "action" in message:
+            action = message["action"]
+            if action in self.callbacks:
+                self.callbacks[message["action"]](message)
 
     def send(self, data):
         pass
@@ -264,6 +267,7 @@ class UDPClient(NetworkClient):
         try:
             data, _ = self.udp_sock.recvfrom(self.UDP_BUFFER_SIZE)
             message = json.loads(data.decode('utf-8'))
+            print(message)
             return message
         except BlockingIOError:
             return None

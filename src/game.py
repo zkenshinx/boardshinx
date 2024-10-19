@@ -7,6 +7,7 @@ import random
 from random import randint
 from functools import lru_cache
 
+from src.board_state import BoardState, BoardStateType
 from src.state_manager import GameStateManager
 from src.network_manager import NetworkManager
 
@@ -300,7 +301,6 @@ class Selection(pygame.sprite.Sprite, BoardObject):
     def finish_selection(self):
         self.phase = Selection.PHASE_SELECTED
         self.selected_objects.clear()
-        print(self.world_rect)
         for sprite in self.game.GIP.get_rendered_objects():
             if sprite == self or not sprite.draggable:
                 continue
@@ -879,7 +879,7 @@ class TransformManager:
         sprite.screen_rect.topleft = (x - sprite.screen_rect.width / (2 * self.camera.zoom_scale), y - sprite.screen_rect.height / (2 * self.camera.zoom_scale))
 
 class CollisionManager:
-    
+
     def __init__(self, camera):
         self.camera = camera
 
@@ -894,14 +894,16 @@ class SpriteGroup(pygame.sprite.Group):
     def __init__(self):
         super().__init__()
 
-class Game:
+class Game(BoardState):
     FPS = 60
     WINDOW_WIDTH = 1280
     WINDOW_HEIGHT = 720
 
-    def __init__(self):
-        self.network_mg = NetworkManager(self, sys.argv[1] if len(sys.argv) > 1 else 'localhost')
-        pygame.init()
+    def __init__(self, state_manager, data):
+        super().__init__(state_manager)
+        self.network_mg = NetworkManager(self, data["tcp_client"], data["udp_client"])
+        self.color = data["color"]
+
         self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.RESIZABLE)
         self.clock = pygame.time.Clock()
         self.running = True
@@ -942,21 +944,20 @@ class Game:
             obj._id = iota
             self.mp[obj._id] = obj
         GameStateManager.load_game_state(self, "dice_throne.zip")
-        self.network_mg.set_networking(True)
 
         self.selection = Selection(self.sprite_group, self)
         assign_id(self.selection)
         self.assign_inf_z_index(self.selection)
 
-    def run(self):
+    def entry(self):
         """Main game loop."""
-        # self.network_mg.start_networking()
+        self.network_mg.set_networking(True)
         while self.running:
             self.handle_events()
             self.handle_ongoing()
             self.sprite_group.update()
             self.renderer.render()
-            # self.network_mg.process_networking()
+            self.network_mg.process_networking()
             pygame.display.update()
             self.clock.tick(self.FPS)
 

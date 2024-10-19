@@ -114,7 +114,7 @@ class GameStateManager:
                 holder.z_index = sprite["z_index"]
                 holder._id = sprite["id"]
                 for image_id in sprite["deck"]:
-                    holder.add_image(game.mp[image_id])
+                    holder.add_image(game.mp[image_id], False)
                 game.mp[holder._id] = holder
             elif sprite["type"] == "player_hand":
                 hand = game_module.PlayerHand(sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.sprite_group, game)

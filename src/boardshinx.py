@@ -2,6 +2,7 @@ import pygame
 from .main_menu import MainMenu
 from .join_room import JoinRoom
 from .board_state import BoardState, BoardStateType
+from .game import Game
 
 class BoardShinx:
     WINDOW_WIDTH = 740
@@ -14,7 +15,8 @@ class BoardShinx:
         self.state = BoardStateType.JOIN_ROOM
         self.states = {
             BoardStateType.MAIN_MENU: MainMenu,
-            BoardStateType.JOIN_ROOM: JoinRoom
+            BoardStateType.JOIN_ROOM: JoinRoom,
+            BoardStateType.GAME: Game
         }
 
     def set_state(self, new_state):
@@ -26,6 +28,8 @@ class BoardShinx:
     def run(self):
         data = None
         while True:
-            state_obj = self.states[self.state](self)
-            data = state_obj.entry(data)
+            print(data, self.state)
+            state_obj = self.states[self.state](self, data)
+            data = state_obj.entry()
+            print(data, self.state)
 

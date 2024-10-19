@@ -34,6 +34,7 @@ class UDPServer:
 
     def broadcast(self, message, sender_addr):
         message = json.dumps(message).encode('utf-8')
+        print("Broadcast: ", message)
         for client in self.clients:
             if client.addr != sender_addr:
                 self.sock.sendto(message, client.addr)
@@ -56,16 +57,64 @@ class UDPServer:
             except Exception as e:
                 print(f"UDP error: {e}")
 
+class Player:
+    def __init__(self, name):
+        self.name = name
+        self.color = None
+
+    def assign_color(self, color):
+        self.color = color
+
 class Room:
+    COLORS = ['#00FF00', '#00FFFF', '#FF0000', 
+              '#FFA500', '#7F00FF', '#8B4513']  # Green, Cyan, Red, Orange, Violet, Brown
+
     def __init__(self, room_id):
         self.room_id = room_id
-        self.players = []
+        self.players = {}
+        self.available_colors = self.COLORS.copy()
+        self.assigned_colors = []
 
     def add_player(self, player_name):
         if player_name in self.players:
             return False
-        self.players.append(player_name)
+        self.players[player_name] = Player(player_name)
         return True
+
+    def has_player(self, player_name):
+        return player_name in self.players
+
+    def get_available_colors(self):
+        return [color for color in self.available_colors if color not in self.get_assigned_colors()]
+
+    def get_assigned_colors(self):
+        return [player.color for player in self.players.values() if player.color is not None]
+
+    def assign_color(self, player_name, color):
+        if not self.has_player(player_name) or color not in self.available_colors:
+            return {
+                "action": "assign_color",
+                "result": "fail",
+                "message": "Invalid player or color",
+                "colors": self.get_available_colors()
+            }
+
+        if color in self.get_assigned_colors():
+            return {
+                "action": "assign_color",
+                "result": "fail",
+                "message": "Color already assigned",
+                "colors": self.get_available_colors()
+            }
+
+        self.players[player_name].assign_color(color)
+        self.assigned_colors.append(color)
+
+        return {
+            "action": "assign_color",
+            "result": "success",
+            "color": color
+        }
 
 class RoomManager:
     def __init__(self):
@@ -79,7 +128,8 @@ class RoomManager:
         if room_id in self.rooms:
             room = self.rooms[room_id]
             if room.add_player(player_name):
-                return (True, {"action": "join", "result": "success"})
+                available_colors = room.get_available_colors()
+                return (True, {"action": "join", "name": player_name, "result": "success", "colors": available_colors})
             return (False, {
                 "action": "join",
                 "result": "fail",
@@ -91,6 +141,13 @@ class RoomManager:
             "message": "Wrong room code"
         })
 
+    def get_player_room(self, player_name):
+        for room_id, room in self.rooms.items():
+            if room.has_player(player_name):
+                return room
+        return None
+
+
 room_manager = RoomManager()
 room_manager.create_room("1")
 
@@ -101,6 +158,7 @@ class TCPServer:
         self.port = port
         self.buffer_size = buffer_size
         self.clients = []
+        self.client_rooms = dict()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind((self.ip, self.port))
         self.sock.listen(5)
@@ -140,10 +198,24 @@ class TCPServer:
             if joined:
                 c = Client(message['name'], addr, client_socket)
                 self.clients.append(c)
+                self.client_rooms[name] = room_manager.get_player_room(name)
             # Send back result
             self.send(client_socket, json.dumps(send_message).encode('utf-8'))
             return
+        elif message['action'] == 'color_chosen':
+            color = message["color"]
+            name = self.get_name(client_socket)
+            room = self.client_rooms[name]
+            send_message = room.assign_color(name, color)
+            self.send(client_socket, json.dumps(send_message).encode('utf-8'))
+            return
         self.broadcast(message, addr)
+
+    def get_name(self, client_socket):
+        for c in self.clients:
+            if c.socket == client_socket:
+                return c.name
+        return None
 
     def handle_client(self, client_socket, addr):
         tcp_data = bytearray()
