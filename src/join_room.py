@@ -48,7 +48,8 @@ class JoinRoom(BoardState):
         return {
             "tcp_client": self.tcp_client,
             "udp_client": self.udp_client,
-            "color": self.assigned_color
+            "color": self.assigned_color,
+            "name": self.user_name
         }
 
     def handle_join_received(self, message):

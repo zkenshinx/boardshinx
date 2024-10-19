@@ -1,3 +1,4 @@
+import random
 import base64
 import zipfile
 import io
@@ -166,6 +167,25 @@ class NetworkManager:
         dice = self.game.mp[message["dice_id"]]
         dice.roll(result=message["result"], send_message=False)
 
+    def cursor_moved_send(self, x, y, name, color):
+        if not self.networking_status or random.randint(1, 4) <= 1:
+            return
+        message = {
+            "action": "cursor_moved",
+            "x": x,
+            "y": y,
+            "name": name,
+            "color": color
+        }
+        self.udp_client.send(message)
+
+    def cursor_moved_received(self, message):
+        x = message["x"]
+        y = message["y"]
+        name = message["name"]
+        color = message["color"]
+        self.game.cursor_moved(x, y, name, color)
+
     def get_game_state(self):
         message = {
             "action": "get_game_state",
@@ -194,7 +214,8 @@ class NetworkManager:
             "rotate_object": self.rotate_object_received,
             "retrieve_button_clicked": self.retrieve_button_clicked_received,
             "shuffle_button_clicked": self.shuffle_button_clicked_received,
-            "dice_rolled": self.dice_rolled_received
+            "dice_rolled": self.dice_rolled_received,
+            "cursor_moved": self.cursor_moved_received
         }
         for action_name, fn in fns.items():
             self.tcp_client.add_callback(action_name, fn)

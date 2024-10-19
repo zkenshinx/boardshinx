@@ -195,15 +195,61 @@ class Dice(pygame.sprite.Sprite, BoardObject):
     def mark_focused(self, is_focused):
         pass
 
+        
+class Cursor(pygame.sprite.Sprite, BoardObject):
+    """Represents a cursor in the game."""
+    def __init__(self, name, color, group, game):
+        super().__init__(group)
+        BoardObject.__init__(self)
+        self.name = name
+        self.color = self.hex_to_rgb(color)
+        self.game = game
+        self.group = group
+        self.z_index = float('inf')
+        self.render = True
+        self._type = "cursor"
+        self.rotation = 0
+        
+        self.cursor_image = pygame.image.load("cursor.svg").convert_alpha()
+        
+        self.size = (15, 20)
+        self.world_rect = pygame.Rect(0, 0, *self.size)
+        self.screen_rect = pygame.Rect(0, 0, *self.size)
+        
+        self.update()
+
+    def update(self):
+        self.display = pygame.Surface(self.size, pygame.SRCALPHA)
+        scaled_cursor = pygame.transform.smoothscale(self.cursor_image, self.size)
+        self.display.blit(scaled_cursor, (0, 0))
+        self.apply_color_to_surface(self.display, self.color)
+
+    def apply_color_to_surface(self, surface, color):
+        w, h = surface.get_size()
+        r, g, b = color
+        for x in range(w):
+            for y in range(h):
+                a = surface.get_at((x, y))[3]
+                surface.set_at((x, y), (r, g, b, a))
+
+    def hex_to_rgb(self, hex_color):
+        """Convert hex color to RGB."""
+        hex_color = hex_color.lstrip('#')
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+    def mark_focused(self, is_focused):
+        pass
+
 class Selection(pygame.sprite.Sprite, BoardObject):
 
     PHASE_NONE = 0
     PHASE_SELECTING = 1
     PHASE_SELECTED = 2
 
-    def __init__(self, group, game):
+    def __init__(self, color, group, game):
         super().__init__(group)
         BoardObject.__init__(self)
+        self.r, self.g, self.b = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
         self.game = game
         self.z_index = 0
         self.render = False
@@ -231,8 +277,9 @@ class Selection(pygame.sprite.Sprite, BoardObject):
             screen_width = world_width * scale
             screen_height = world_height * scale
             surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
-            surface.fill((173, 216, 230, 128))
-            pygame.draw.rect(surface, (0, 0, 255), (0, 0, screen_width, screen_height), 2)
+
+            surface.fill((self.r, self.g, self.b, 50))
+            pygame.draw.rect(surface, (self.r, self.g, self.b), (0, 0, screen_width, screen_height), 2)
 
             x = min(self.world_start_pos[0], self.world_end_pos[0])
             y = min(self.world_start_pos[1], self.world_end_pos[1])
@@ -249,7 +296,7 @@ class Selection(pygame.sprite.Sprite, BoardObject):
 
             for sprite in self:
                 rect = sprite.world_rect.copy().move(-min_x, -min_y)
-                surface.fill((0, 0, 255, 100), rect)
+                surface.fill((self.r, self.g, self.b, 125), rect)
             self.world_start_pos = (min_x, min_y)
             self.world_end_pos = (max_x, max_y)
             self.world_rect = pygame.rect.Rect(min_x, min_y, max_x - min_x, max_y - min_y)
@@ -767,6 +814,7 @@ class Camera:
             "shuffle_button": 2,
             "retrieve_button": 2,
             "dice": 2,
+            "cursor": 2,
             "selection": 101,
             "player_hand": 100,
         }
@@ -828,7 +876,7 @@ class Renderer:
             pos_x, pos_y = self.camera.apply_zoom(*self.camera.apply_rotation(*sprite.screen_rect.topleft))
             global_rotation = self.camera.global_rotation
             rotation = global_rotation + sprite.rotation
-            rotated_sprite = pygame.transform.rotate(sprite.display, global_rotation + sprite.rotation)
+            rotated_sprite = pygame.transform.rotate(sprite.display, rotation)
             if global_rotation == 90:
                 pos_y -= sprite.screen_rect.width
             elif global_rotation == 180:
@@ -903,6 +951,7 @@ class Game(BoardState):
         super().__init__(state_manager)
         self.network_mg = NetworkManager(self, data["tcp_client"], data["udp_client"])
         self.color = data["color"]
+        self.name = data["name"]
 
         self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.RESIZABLE)
         self.clock = pygame.time.Clock()
@@ -931,6 +980,8 @@ class Game(BoardState):
         self.ongoing = []
         self.selection_present = False
 
+        self.other_cursors = dict()
+
         self.mp = {}
         self.GIP = GameInfoProvider(self, self.sprite_group)
         self.GOM = GameObjectManipulator(self, self.sprite_group, self.GIP)
@@ -945,7 +996,7 @@ class Game(BoardState):
             self.mp[obj._id] = obj
         GameStateManager.load_game_state(self, "dice_throne.zip")
 
-        self.selection = Selection(self.sprite_group, self)
+        self.selection = Selection(self.color, self.sprite_group, self)
         assign_id(self.selection)
         self.assign_inf_z_index(self.selection)
 
@@ -1054,6 +1105,8 @@ class Game(BoardState):
                 break
 
     def mouse_motion(self, event):
+        x, y = self.camera.mouse_pos()
+        self.network_mg.cursor_moved_send(x, y, self.name, self.color)
         if self.moving_around_board and (pygame.mouse.get_pressed()[1] or pygame.key.get_mods() & pygame.KMOD_ALT):
             self.process_moving_around_board(event)
         elif self.is_holding_object and self.held_object is not None:
@@ -1151,6 +1204,11 @@ class Game(BoardState):
 
     def add_ongoing(self, ongoing_event):
         self.ongoing.append(ongoing_event)
+
+    def cursor_moved(self, x, y, name, color):
+        if name not in self.other_cursors:
+            self.other_cursors[name] = Cursor(name, color, self.sprite_group, self)
+        self.transform_manager.move_sprite_to(self.other_cursors[name], x, y)
 
     def initialize_z_index(self):
         for obj in self.mp.keys():
