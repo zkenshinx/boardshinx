@@ -821,7 +821,7 @@ class RetrieveButton(Button):
                     image.assign_front(False)
                     self.deck.add_image(image, send_message=False)
                 ongoing_event = OngoingMove(image.screen_rect.topleft, self.deck.screen_rect.topleft, 45, image, self.game, callback)
-                game.add_ongoing(ongoing_event)
+                self.game.add_ongoing(ongoing_event)
 
 class Camera:
     def __init__(self, sprite_group):
