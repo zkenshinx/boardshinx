@@ -1,3 +1,4 @@
+import sys
 import random
 import base64
 import zipfile
@@ -74,32 +75,36 @@ class NetworkManager:
         holder = self.game.mp[message["holder_id"]]
         holder.pop_image(self.game.mp[message["image_id"]], False)
 
-    def add_image_to_hand_send(self, image):
+    def add_image_to_hand_send(self, hand, image, index):
         if not self.networking_status:
             return
         message = {
             "action": "add_image_to_hand",
-            "image_id": image._id
+            "hand_id": hand._id,
+            "image_id": image._id,
+            "index": index
         }
         self.tcp_client.send(message)
 
     def add_image_to_hand_received(self, message):
+        hand = self.game.mp[message["hand_id"]]
         image = self.game.mp[message["image_id"]]
-        image.render = False
+        hand.add_image(image, message["index"], send_message=False)
 
-    def remove_image_from_hand_send(self, image):
+    def remove_image_from_hand_send(self, hand, image):
         if not self.networking_status:
             return
         message = {
             "action": "remove_image_from_hand",
+            "hand_id": hand._id,
             "image_id": image._id
         }
         self.tcp_client.send(message)
 
     def remove_image_from_hand_received(self, message):
+        hand = self.game.mp[message["hand_id"]]
         image = self.game.mp[message["image_id"]]
-        image.assign_front(False)
-        image.render = True
+        hand.remove_image(image, send_message=False)
 
     def shuffle_holder_send(self, holder):
         if not self.networking_status:
@@ -152,6 +157,19 @@ class NetworkManager:
 
     def shuffle_button_clicked_received(self, message):
         self.game.mp[message["button_id"]].shuffle()
+
+    def sit_button_clicked_send(self, button, player):
+        if not self.networking_status:
+            return
+        message = {
+            "action": "sit_button_clicked",
+            "button_id": button._id,
+            "player": player
+        }
+        self.tcp_client.send(message)
+
+    def sit_button_clicked_received(self, message):
+        self.game.mp[message["button_id"]].sit(message["player"])
 
     def dice_rolled_send(self, dice, dice_result):
         if not self.networking_status:
@@ -211,9 +229,10 @@ class NetworkManager:
             "rotate_object": self.rotate_object_received,
             "retrieve_button_clicked": self.retrieve_button_clicked_received,
             "shuffle_button_clicked": self.shuffle_button_clicked_received,
+            "sit_button_clicked": self.sit_button_clicked_received,
             "dice_rolled": self.dice_rolled_received,
             "cursor_moved": self.cursor_moved_received,
-            "get_game_state": self.get_game_state_received
+            "get_game_state": self.get_game_state_received,
         }
         for action_name, fn in fns.items():
             self.tcp_client.add_callback(action_name, fn)
@@ -272,6 +291,9 @@ class UDPClient(NetworkClient):
         super().__init__()
         self.SERVER_IP = ip
         self.SERVER_UDP_PORT = port
+        with open('port', 'r') as f:
+            self.SERVER_IP = f.readline().strip()
+            self.SERVER_UDP_PORT = int(f.readline().strip())
         self.UDP_BUFFER_SIZE = 1024
 
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -286,7 +308,6 @@ class UDPClient(NetworkClient):
         try:
             data, _ = self.udp_sock.recvfrom(self.UDP_BUFFER_SIZE)
             message = json.loads(data.decode('utf-8'))
-            print(message)
             return message
         except BlockingIOError:
             return None
@@ -298,10 +319,12 @@ class TCPClient(NetworkClient):
 
     def __init__(self, ip="localhost", port=23457):
         super().__init__()
+        # Currently for development purposes
         self.SERVER_IP = ip
         self.SERVER_TCP_PORT = port
         with open('port', 'r') as f:
-            self.SERVER_TCP_PORT = int(f.read())
+            self.SERVER_IP = f.readline().strip()
+            self.SERVER_TCP_PORT = int(f.readline().strip()) + 1
         self.TCP_BUFFER_SIZE = 4096 * 4 * 4
         self.tcp_data = bytearray()
 

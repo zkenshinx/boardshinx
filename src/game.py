@@ -579,7 +579,7 @@ class Holder(pygame.sprite.Sprite, BoardObject):
         self.create_display()
 
 class PlayerHand(pygame.sprite.Sprite, BoardObject):
-    def __init__(self, x, y, width, height, group, game):
+    def __init__(self, x, y, width, height, group, game, owner=""):
         super().__init__(group)
         BoardObject.__init__(self)
         self.world_rect = pygame.rect.Rect(x, y, width, height)
@@ -591,6 +591,7 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
         self.render = True
         self.insert_image_index = 0
         self.margin = 10
+        self.owner = owner
         self.create_display()
 
     def create_display(self):
@@ -660,22 +661,32 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
     def display(self):
         return self.create_display()
 
-    def add_image(self, image):
+    def add_image(self, image, index=None, send_message=True):
         if image not in self.deck:
-            self.game.network_mg.add_image_to_hand_send(image)
             image.render = False
             self.mark_focused(False)
-            if not image.is_front:
-                image.flip(False)
-            self.deck.insert(self.insert_image_index, image)
 
-    def remove_image(self, image):
+            if self.owner == self.game.name and not image.is_front:
+                image.flip(False)
+            elif self.owner != self.game.name and image.is_front:
+                image.flip(True)
+
+            if index is None:
+                index = self.insert_image_index
+            self.deck.insert(index, image)
+
+            if send_message:
+                self.game.network_mg.add_image_to_hand_send(self, image, index)
+
+    def remove_image(self, image, send_message=True):
         if image in self.deck:
-            self.game.network_mg.remove_image_from_hand_send(image)
             image.render = True
             if image.is_front:
                 image.flip()
             self.deck.remove(image)
+
+            if send_message:
+                self.game.network_mg.remove_image_from_hand_send(self, image)
 
     def holding(self):
         deck_len = len(self.deck)
@@ -771,7 +782,22 @@ class ShuffleButton(Button):
         # Animation
         ongoing_shuffle = OngoingShuffle(self.holder, self.game)
         self.game.add_ongoing(ongoing_shuffle)
-        
+
+class SitButton(Button):
+
+    def __init__(self, group, game, x, y, width, height, hand, font_size=25):
+        super().__init__(group, game, "Sit", x, y, width, height, font_size)
+        self.game = game
+        self.hand = hand
+        self._type = "sit_button"
+
+    def clicked(self):
+        self.game.network_mg.sit_button_clicked_send(self, self.game.name)
+        self.sit(self.game.name)
+
+    def sit(self, owner):
+        self.hand.owner = owner
+        self.render = False
 
 class RetrieveButton(Button):
 
@@ -813,6 +839,7 @@ class Camera:
             "holder": 2,
             "shuffle_button": 2,
             "retrieve_button": 2,
+            "sit_button": 2,
             "dice": 2,
             "cursor": 2,
             "selection": 101,
@@ -995,6 +1022,7 @@ class Game(BoardState):
             obj._id = iota
             self.mp[obj._id] = obj
         #GameStateManager.load_game_state(self, "dice_throne.zip")
+        #self.network_mg.set_networking(True)
 
         self.selection = Selection(self.color, self.sprite_group, self)
         assign_id(self.selection)
@@ -1043,7 +1071,7 @@ class Game(BoardState):
 
     def key_down(self, event):
         if event.key == pygame.K_ESCAPE:
-            self.running = False
+            self.running = True
         elif event.key in [pygame.K_q, pygame.K_e]:
             self.process_rotation_clicked(event)
         elif event.key in [pygame.K_z, pygame.K_x]:

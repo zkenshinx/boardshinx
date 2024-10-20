@@ -67,6 +67,8 @@ class GameStateManager:
                     arr["images_to_retrieve"] = [f._id for f in sprite.images_to_retrieve]
                 elif sprite._type == "shuffle_button":
                     arr["holder"] = sprite.holder._id
+                elif sprite._type == "sit_button":
+                    arr["hand"] = sprite.hand._id
                 game_state.append(arr)
         for sprite in game.sprite_group.sprites():
             if sprite._type == "dice":
@@ -90,7 +92,7 @@ class GameStateManager:
     @staticmethod
     def load_game_state(game, input_zip_path="game_state.zip"):
         zipf = zipfile.ZipFile(input_zip_path, "r")
-        # zipf.extractall()
+        zipf.extractall()
         with open("game_state.json", 'r') as file:
             game_state = json.load(file)
         for sprite in game_state:
@@ -131,6 +133,11 @@ class GameStateManager:
                 for image_id in sprite["images_to_retrieve"]:
                     images_to_retrieve.append(game.mp[image_id])
                 button = game_module.RetrieveButton(game.sprite_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["holder"]], images_to_retrieve)
+                button.z_index = sprite["z_index"]
+                button._id = sprite["id"]
+                game.mp[button._id] = button
+            elif sprite["type"] == "sit_button":
+                button = game_module.SitButton(game.sprite_group, game, sprite["x"], sprite["y"], sprite["width"], sprite["height"], game.mp[sprite["hand"]])
                 button.z_index = sprite["z_index"]
                 button._id = sprite["id"]
                 game.mp[button._id] = button

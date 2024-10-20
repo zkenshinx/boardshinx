@@ -2,17 +2,18 @@ import base64
 import socket
 import json
 from collections import namedtuple
+from random import randint
 import threading
 import signal
 import sys
 
 MESSAGE_END = b'json_end_zk3nsh1nx'
 SERVER_IP = 'localhost'
-SERVER_UDP_PORT = 23456
-from random import randint
-SERVER_TCP_PORT = randint(25000, 28000)
+SERVER_UDP_PORT = randint(25000, 28000)
+SERVER_TCP_PORT = SERVER_UDP_PORT + 1
 f = open('port', 'w') 
-f.write(str(SERVER_TCP_PORT))
+f.write(SERVER_IP + '\n')
+f.write(str(SERVER_UDP_PORT))
 f.flush()
 UDP_BUFFER_SIZE = 1024
 TCP_BUFFER_SIZE = 4096 * 4

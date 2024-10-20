@@ -28,8 +28,6 @@ class BoardShinx:
     def run(self):
         data = None
         while True:
-            print(data, self.state)
             state_obj = self.states[self.state](self, data)
             data = state_obj.entry()
-            print(data, self.state)
 
