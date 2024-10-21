@@ -10,53 +10,21 @@ from functools import lru_cache
 from src.board_state import BoardState, BoardStateType
 from src.state_manager import GameStateManager
 from src.network_manager import NetworkManager
+from src.button_sprite import ShuffleButton, SitButton, RetrieveButton
+from src.board_object import BoardObject
+from src.ongoing import OngoingMove, OngoingShuffle, OngoingRoll
 
 ROTATION_STEP = 90
 ROTATION_STEP_MOD = 360
 PIXEL_PERFECT = 5
 
-class BoardObject:
-
-    def __init__(self):
-        self.static_rendering = False
-        self.is_focused = False
-        self.draggable = False
-        self.clickable = True
-        self.rotatable = False
-        self.z_index = 0
-        self.rotation = 0
-
-    def update(self):
-        pass
-
-    def clicked(self):
-        pass
-
-    def holding(self):
-        return self
-
-    def hovering(self):
-        self.mark_focused(True)
-
-    def not_hovering(self):
-        self.mark_focused(False)
-
-    def mark_focused(self, is_focused):
-        if self.is_focused != is_focused:
-            self.is_focused = is_focused
-            self.create_display()
-
-    def release(self):
-        pass
-
-class Image(pygame.sprite.Sprite, BoardObject):
+class Image(BoardObject):
 
     image_cache = dict()
 
     """Represents an image in the game."""
     def __init__(self, front_path, x, y, width, height, group, game, flipable=False, draggable=True, rotatable=True, back_path=None):
         super().__init__(group)
-        BoardObject.__init__(self)
         self.game  = game
         self.world_rect = pygame.rect.Rect(x, y, width, height)
         self.screen_rect = pygame.rect.Rect(x, y, width, height)
@@ -141,12 +109,11 @@ class Image(pygame.sprite.Sprite, BoardObject):
     def __repr__(self):
         return f"Image: {self.front_image_path}"
 
-class Dice(pygame.sprite.Sprite, BoardObject):
+class Dice(BoardObject):
 
     """Represents a dice in the game."""
     def __init__(self, paths, x, y, width, height, group, game, draggable=True, rotatable=True):
         super().__init__(group)
-        BoardObject.__init__(self)
         self.game = game
         self.world_rect = pygame.rect.Rect(x, y, width, height)
         self.screen_rect = pygame.rect.Rect(x, y, width, height)
@@ -196,11 +163,10 @@ class Dice(pygame.sprite.Sprite, BoardObject):
         pass
 
         
-class Cursor(pygame.sprite.Sprite, BoardObject):
+class Cursor(BoardObject):
     """Represents a cursor in the game."""
     def __init__(self, name, color, group, game):
         super().__init__(group)
-        BoardObject.__init__(self)
         self.name = name
         self.color = self.hex_to_rgb(color)
         self.game = game
@@ -240,7 +206,7 @@ class Cursor(pygame.sprite.Sprite, BoardObject):
     def mark_focused(self, is_focused):
         pass
 
-class Selection(pygame.sprite.Sprite, BoardObject):
+class Selection(BoardObject):
 
     PHASE_NONE = 0
     PHASE_SELECTING = 1
@@ -248,7 +214,6 @@ class Selection(pygame.sprite.Sprite, BoardObject):
 
     def __init__(self, color, group, game):
         super().__init__(group)
-        BoardObject.__init__(self)
         self.r, self.g, self.b = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
         self.game = game
         self.z_index = 0
@@ -370,118 +335,10 @@ class Selection(pygame.sprite.Sprite, BoardObject):
     def __iter__(self):
         return iter(self.selected_objects)
 
-class OngoingMove:
-    def __init__(self, start_pos, end_pos, count, move_obj, game, callback_fn=None):
-        self.game = game
-        self.start_pos = pygame.Vector2(*start_pos)
-        self.end_pos = pygame.Vector2(*end_pos)
-        self.count = count
-        self.current_count = 0
-        self.move_obj = move_obj
-        self.callback_fn = callback_fn
-
-    def lerp(self, t):
-        return self.start_pos + (self.end_pos - self.start_pos) * t
-
-    def update(self):
-        self.current_count += 1
-        if self.is_finished():
-            pos = self.end_pos
-        else:
-            t = self.current_count / self.count 
-            pos = self.lerp(t)
-        self.game.transform_manager.move_sprite_to(self.move_obj, pos.x, pos.y)
-
-    def is_finished(self):
-        if self.current_count >= self.count:
-            if self.callback_fn is not None:
-                self.callback_fn(self.move_obj)
-            return True
-        return False
-
-class OngoingShuffle:
-    def __init__(self, holder, game):
-        self.game = game
-        self.holder = holder
-        self.step = 0
-        self.step_counter = 0
-
-        # Initial step
-        images_for_animation = 10
-        self.top_images = []
-        for i in range(images_for_animation):
-            top_image = self.holder.pop_image(send_message=False)
-            if top_image is None:
-                break
-            next = self.generate_random_next_coordinate()
-            self.game.transform_manager.move_sprite_to(top_image, *next)
-            self.top_images.append(top_image)
-            self.game.assign_z_index(top_image)
-
-    def generate_random_next_coordinate(self):
-        diff_left = int(-self.holder.world_rect.width * 0.9)
-        diff_right = int(self.holder.world_rect.width * 0.2)
-        center = self.holder.world_rect.center
-        next_x = center[0] + randint(diff_left, diff_right)
-        next_y = center[1] + randint(diff_left, diff_right)
-        return next_x, next_y
-
-    def update(self):
-        limit = 10
-        if self.step_counter % limit == 0:
-            self.step += 1
-            if self.step == 6:
-                return
-            for image in self.top_images:
-                if self.step == 5:
-                    dest = self.holder.world_rect.topleft
-                else:
-                    dest = self.generate_random_next_coordinate()
-                ongoing_event = OngoingMove(image.world_rect.topleft, dest, limit, image, self.game, None)
-                self.game.add_ongoing(ongoing_event)
-        self.step_counter += 1
-
-    def is_finished(self):
-        if self.step >= 6:
-            for image in self.top_images:
-                self.holder.add_image(image, False)
-            return True
-
-class OngoingRoll:
-    def __init__(self, dice, result, game):
-        self.game = game
-        self.dice = dice
-        self.result = result
-        self.step = 0
-        self.start_rect = self.dice.world_rect.copy()
-
-    def generate_random_next_coordinate(self):
-        diff_left = int(-self.start_rect.width * 0.1)
-        diff_right = int(self.start_rect.width * 0.1)
-        topleft = self.start_rect.topleft
-        next_x = topleft[0] + randint(diff_left, diff_right)
-        next_y = topleft[1] + randint(diff_left, diff_right)
-        return next_x, next_y
-
-    def update(self):
-        self.step += 1
-        if self.step % 3 == 0:
-            dest = self.generate_random_next_coordinate()
-            self.game.transform_manager.move_sprite_to(self.dice, *dest)
-            self.dice.set_random()
-
-    def is_finished(self):
-        if self.step >= 50:
-            self.game.transform_manager.move_sprite_to(self.dice, self.start_rect.x, self.start_rect.y)
-            self.dice.set_specific(self.result)
-            return True
-        return False
-
-class Holder(pygame.sprite.Sprite, BoardObject):
+class Holder(BoardObject):
     """Represents an image deck in the game."""
     def __init__(self, x, y, width, height, group, game):
         super().__init__(group)
-        BoardObject.__init__(self)
         self.game = game
         self.group = group
         self.world_rect = pygame.rect.Rect(x, y, width, height)
@@ -578,10 +435,9 @@ class Holder(pygame.sprite.Sprite, BoardObject):
     def update(self):
         self.create_display()
 
-class PlayerHand(pygame.sprite.Sprite, BoardObject):
+class PlayerHand(BoardObject):
     def __init__(self, x, y, width, height, group, game, owner=""):
         super().__init__(group)
-        BoardObject.__init__(self)
         self.world_rect = pygame.rect.Rect(x, y, width, height)
         self.screen_rect = pygame.rect.Rect(x, y, width, height)
         self.game = game
@@ -718,110 +574,6 @@ class PlayerHand(pygame.sprite.Sprite, BoardObject):
 
     def __contains__(self, item):
         return item in self.deck
-
-class Button(pygame.sprite.Sprite, BoardObject):
-    def __init__(self, group, game, text, x, y, width, height, font_size=25):
-        super().__init__(group)
-        BoardObject.__init__(self)
-        self.game = game
-        self.group = group
-        self._type = "button"
-        self.render = True
-        self.text = text
-        self.screen_rect = pygame.rect.Rect(x, y, width, height)
-        self.world_rect = self.screen_rect.copy()
-        self.font_size = font_size
-        self.create_display()
-
-    def create_display(self):
-        text_color = (0, 0, 0)
-        button_color = (255, 255, 255)
-        border_color = (0, 0, 0)
-        
-        border_thickness = max(1, int(self.screen_rect.height / 50))
-        surface = pygame.Surface((self.screen_rect.width, self.screen_rect.height), pygame.SRCALPHA)
-        
-        pygame.draw.rect(surface, button_color, (0, 0, self.screen_rect.width, self.screen_rect.height), border_radius=7)
-        
-        pygame.draw.rect(surface, border_color, (0, 0, self.screen_rect.width, self.screen_rect.height), 
-                         width=border_thickness, border_radius=7)
-
-        font = pygame.font.Font(None, self.font_size)
-        text_surface = font.render(self.text, True, text_color)
-        text_rect = text_surface.get_rect(center=(self.screen_rect.width / 2, self.screen_rect.height / 2))
-        surface.blit(text_surface, text_rect)
-
-        if self.is_focused:
-            gray_overlay = pygame.Surface((self.screen_rect.width, self.screen_rect.height), pygame.SRCALPHA)
-            gray_overlay.fill((0, 0, 0, 0))
-            pygame.draw.rect(gray_overlay, (128, 128, 128, 80), (0, 0, self.screen_rect.width, self.screen_rect.height), border_radius=10)
-            surface.blit(gray_overlay, (0, 0))
-        
-        self.display = surface
-
-    def clicked(self):
-        pass
-
-    def update(self):
-        self.create_display()
-
-class ShuffleButton(Button):
-
-    def __init__(self, group, game, x, y, width, height, holder, font_size=25):
-        super().__init__(group, game, "Shuffle", x, y, width, height, font_size)
-        self.game = game
-        self.holder = holder
-        self._type = "shuffle_button"
-
-    def clicked(self):
-        self.game.network_mg.shuffle_button_clicked_send(self)
-        self.shuffle()
-
-    def shuffle(self):
-        self.holder.shuffle()
-        # Animation
-        ongoing_shuffle = OngoingShuffle(self.holder, self.game)
-        self.game.add_ongoing(ongoing_shuffle)
-
-class SitButton(Button):
-
-    def __init__(self, group, game, x, y, width, height, hand, font_size=25):
-        super().__init__(group, game, "Sit", x, y, width, height, font_size)
-        self.game = game
-        self.hand = hand
-        self._type = "sit_button"
-
-    def clicked(self):
-        self.game.network_mg.sit_button_clicked_send(self, self.game.name)
-        self.sit(self.game.name)
-
-    def sit(self, owner):
-        self.hand.owner = owner
-        self.render = False
-
-class RetrieveButton(Button):
-
-    def __init__(self, group, game, x, y, width, height, deck, images_to_retrieve, font_size=25):
-        super().__init__(group, game, "Retrieve", x, y, width, height, font_size)
-        self.game = game
-        self.deck = deck
-        self.images_to_retrieve = images_to_retrieve
-        self._type = "retrieve_button"
-
-    def clicked(self):
-        self.game.network_mg.retrieve_button_clicked_send(self)
-        self.retrieve()
-
-    def retrieve(self):
-        for image in self.images_to_retrieve:
-            if hasattr(self.game, "player_hand") and image in self.game.player_hand.deck:
-                self.game.player_hand.remove_image(image)
-            if image not in self.deck.deck:
-                def callback(image):
-                    image.assign_front(False)
-                    self.deck.add_image(image, send_message=False)
-                ongoing_event = OngoingMove(image.screen_rect.topleft, self.deck.screen_rect.topleft, 45, image, self.game, callback)
-                self.game.add_ongoing(ongoing_event)
 
 class Camera:
     def __init__(self, sprite_group):

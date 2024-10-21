@@ -20,14 +20,17 @@ class NetworkManager:
             "action": "move_object",
             "object_id": obj._id,
             "x": obj.world_rect.x,
-            "y": obj.world_rect.y
+            "y": obj.world_rect.y,
+            "z_index": obj.z_index
         }
         self.udp_client.send(message)
 
     def move_object_received(self, message):
         x = message["x"]
         y = message["y"]
-        self.game.transform_manager.move_sprite_to(self.game.mp[message["object_id"]], x, y)
+        obj = self.game.mp[message["object_id"]]
+        obj.z_index = message["z_index"]
+        self.game.transform_manager.move_sprite_to(obj, x, y)
 
     def flip_image_send(self, image):
         if not self.networking_status:
@@ -35,13 +38,15 @@ class NetworkManager:
         message = {
             "action": "flip_image",
             "image_id": image._id,
-            "is_front": image.is_front
+            "is_front": image.is_front,
+            "z_index": image.z_index
         }
         self.tcp_client.send(message)
 
     def flip_image_received(self, message):
         image = self.game.mp[message["image_id"]]
         image.assign_front(message["is_front"])
+        image.z_index = message["z_index"]
         for holder in self.game.GIP.get_holders():
             if image in holder.deck:
                 holder.create_display()
@@ -126,12 +131,14 @@ class NetworkManager:
         message = {
             "action": "rotate_object",
             "object_id": obj._id,
-            "direction": direction
+            "direction": direction,
+            "z_index": obj.z_index
         }
         self.tcp_client.send(message)
 
     def rotate_object_received(self, message):
         obj = self.game.mp[message["object_id"]]
+        obj.z_index = message["z_index"]
         self.game.GOM.try_rotate_obj(message["direction"], obj, False)
 
     def retrieve_button_clicked_send(self, button):
@@ -177,12 +184,14 @@ class NetworkManager:
         message = {
             "action": "dice_rolled",
             "dice_id": dice._id,
-            "result": dice_result
+            "result": dice_result,
+            "z_index": dice.z_index
         }
         self.tcp_client.send(message)
 
     def dice_rolled_received(self, message):
         dice = self.game.mp[message["dice_id"]]
+        dice.z_index = message["z_index"]
         dice.roll(result=message["result"], send_message=False)
 
     def cursor_moved_send(self, x, y, name, color):
