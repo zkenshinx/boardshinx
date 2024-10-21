@@ -291,9 +291,13 @@ class UDPClient(NetworkClient):
         super().__init__()
         self.SERVER_IP = ip
         self.SERVER_UDP_PORT = port
-        with open('port', 'r') as f:
-            self.SERVER_IP = f.readline().strip()
-            self.SERVER_UDP_PORT = int(f.readline().strip())
+        if len(sys.argv) > 1:
+            self.SERVER_IP = sys.argv[1]
+            self.SERVER_UDP_PORT = int(sys.argv[2]) + 1
+        else:
+            with open('port', 'r') as f:
+                self.SERVER_IP = f.readline().strip()
+                self.SERVER_TCP_PORT = int(f.readline().strip())
         self.UDP_BUFFER_SIZE = 1024
 
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -322,9 +326,13 @@ class TCPClient(NetworkClient):
         # Currently for development purposes
         self.SERVER_IP = ip
         self.SERVER_TCP_PORT = port
-        with open('port', 'r') as f:
-            self.SERVER_IP = f.readline().strip()
-            self.SERVER_TCP_PORT = int(f.readline().strip()) + 1
+        if len(sys.argv) > 1:
+            self.SERVER_IP = sys.argv[1]
+            self.SERVER_TCP_PORT = int(sys.argv[2]) + 1
+        else:
+            with open('port', 'r') as f:
+                self.SERVER_IP = f.readline().strip()
+                self.SERVER_TCP_PORT = int(f.readline().strip()) + 1
         self.TCP_BUFFER_SIZE = 4096 * 4 * 4
         self.tcp_data = bytearray()
 
