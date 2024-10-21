@@ -293,7 +293,7 @@ class UDPClient(NetworkClient):
         self.SERVER_UDP_PORT = port
         if len(sys.argv) > 1:
             self.SERVER_IP = sys.argv[1]
-            self.SERVER_UDP_PORT = int(sys.argv[2]) + 1
+            self.SERVER_UDP_PORT = int(sys.argv[2])
         else:
             with open('port', 'r') as f:
                 self.SERVER_IP = f.readline().strip()
